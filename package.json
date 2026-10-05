@@ -1,0 +1,24 @@
+{
+	"name": "hyperzod-ordering-e2e",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Playwright end-to-end tests for the Hyperzod consumer ordering UI (hyperzod-ui-ordering)",
+	"scripts": {
+		"test": "playwright test",
+		"test:web": "playwright test --project=setup --project=web --project=cleanup",
+		"test:android": "playwright test --project=setup --project=android --project=cleanup",
+		"test:ios": "playwright test --project=setup --project=ios --project=cleanup",
+		"test:mobile": "playwright test --project=setup --project=android --project=ios --project=cleanup",
+		"test:smoke": "playwright test --project=setup --project=web --project=cleanup --grep @smoke",
+		"test:headed": "playwright test --headed",
+		"test:ui": "playwright test --ui",
+		"test:signup": "playwright test --project=setup",
+		"test:debug": "playwright test --debug",
+		"lint": "node scripts/syntax-check.js",
+		"report": "playwright show-report"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.48.2",
+		"dotenv": "^16.4.5"
+	}
+}

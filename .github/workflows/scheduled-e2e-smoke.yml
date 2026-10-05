@@ -1,0 +1,99 @@
+# Scheduled smoke runs (free tier friendly) - companion to scheduled-e2e.yml.
+#
+# Smoke 4x daily (times in IST -> cron is UTC):
+#  5:00 AM IST = 23:30 UTC (prev day) | 1:00 PM IST = 07:30 UTC
+#  3:00 AM IST = 21:30 UTC (prev day) | 1:00 AM IST = 19:30 UTC (prev day)
+# The full matrix runs once at 6 PM IST via scheduled-e2e.yml.
+# Same concurrency group as the full workflow: one test user/cart means
+# smoke and full runs must never overlap, however they were triggered.
+
+name: scheduled-e2e-smoke
+
+on:
+  schedule:
+    - cron: "30 23 * * *"
+    - cron: "30 7 * * *"
+    - cron: "30 19 * * *"
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which suite to run"
+        required: true
+        default: "smoke"
+        type: choice
+        options: [smoke, web, android, ios, mobile, all]
+      base_url:
+        description: "Store under test (default: suite default)"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: ordering-e2e-suite
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.48.2-jammy
+    timeout-minutes: 60
+    env:
+      BASE_URL: ${{ inputs.base_url || secrets.E2E_BASE_URL }}
+      TEST_USER_FIRST_NAME: ${{ secrets.E2E_USER_FIRST_NAME }}
+      TEST_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      TEST_USER_PHONE: ${{ secrets.E2E_USER_PHONE }}
+      TEST_USER_COUNTRY: ${{ secrets.E2E_USER_COUNTRY }}
+      TEST_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+      TEST_LOCATION_QUERY: ${{ secrets.E2E_LOCATION_QUERY }}
+      TEST_FALLBACK_OTP: ${{ secrets.E2E_FALLBACK_OTP }}
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint (syntax + module load)
+        run: npm run lint
+
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Resolve suite (schedule always runs smoke; manual picks)
+        id: suite
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "name=smoke" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ inputs.suite }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run E2E suite
+        run: |
+          case "${{ steps.suite.outputs.name }}" in
+            smoke)   npm run test:smoke ;;
+            web)     npm run test:web ;;
+            android) npm run test:android ;;
+            ios)     npm run test:ios ;;
+            mobile)  npm run test:mobile ;;
+            all)     npm run test:web && npm run test:android && npm run test:ios ;;
+          esac
+
+      - name: Upload evidence (report + traces + videos)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-${{ github.run_number }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+
+      - name: Notify Slack with latest report
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          E2E_SUITE_LABEL: smoke
+        run: python3 scripts/notify-slack.py

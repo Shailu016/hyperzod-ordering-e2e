@@ -1,0 +1,53 @@
+image: mcr.microsoft.com/playwright:v1.48.2-jammy
+
+options:
+  max-time: 60
+
+definitions:
+  steps:
+    - step: &e2e-smoke
+        name: Ordering E2E - smoke (web)
+        caches:
+          - node
+        script:
+          - npm ci --no-audit --no-fund
+          - npm run lint
+          - npx playwright install --with-deps chromium
+          - npm run test:smoke
+        artifacts:
+          - test-results/**
+          - playwright-report/**
+
+pipelines:
+  pull-requests:
+    "**":
+      - step:
+          <<: *e2e-smoke
+
+  custom:
+    e2e-web:
+      - step:
+          name: Ordering E2E - full web
+          caches:
+            - node
+          script:
+            - npm ci --no-audit --no-fund
+            - npm run lint
+            - npx playwright install --with-deps chromium
+            - npm run test:web
+          artifacts:
+            - test-results/**
+            - playwright-report/**
+    e2e-mobile:
+      - step:
+          name: Ordering E2E - android + ios emulation
+          caches:
+            - node
+          script:
+            - npm ci --no-audit --no-fund
+            - npm run lint
+            - npx playwright install --with-deps chromium webkit
+            - npm run test:mobile
+          artifacts:
+            - test-results/**
+            - playwright-report/**

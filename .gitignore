@@ -1,0 +1,10 @@
+node_modules/
+test-results/
+playwright-report/
+scheduled-logs/
+.auth/
+.env
+# Local run logs and done-markers (regenerated every run)
+*.log
+*-DONE.txt
+__pycache__/
