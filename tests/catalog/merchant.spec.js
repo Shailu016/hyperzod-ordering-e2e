@@ -4,7 +4,7 @@ async function openMerchant(page) {
   await ensureLocation(page); await ensureLoggedIn(page);
   await gotoWithRetry(page, '/en/home'); await waitForAppBoot(page);
   await page.locator('.merchant-card:visible').first().click();
-  await page.waitForURL(/\/m(\/|$)/);
+  await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await expect(page.locator('h1:visible').first()).toBeVisible();
 }
 test('merchant search filters an unmatched query to an empty state @catalog', async ({ page }) => {

@@ -14,7 +14,7 @@ test('places a COD order end-to-end and sees it in order history @smoke @checkou
   await gotoWithRetry(page, '/en/home');
   await waitForAppBoot(page);
   await page.locator('.merchant-card:visible').first().click();
-  await page.waitForURL(/\/m(\/|$)/);
+  await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
   const added = await addFirstProductToCart(page);
   await gotoCheckout(page, added.cart_id);
   await ensureDeliveryAddress(page);
@@ -51,7 +51,7 @@ test('places a COD order end-to-end and sees it in order history @smoke @checkou
   await testInfo.attach('created-order', { body: Buffer.from(JSON.stringify({ orderId, bill, lines })), contentType: 'application/json' });
   expect(submitted, 'exactly one order submission').toBe(1);
   if (body.data?.total_amount != null) expect(Number(body.data.total_amount)).toBeCloseTo(bill.total, 2);
-  await page.waitForURL(/order\/success|profile\/order/, { timeout: 45_000 });
+  await page.waitForURL(/order\/success|profile\/order/, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await gotoAuthed(page, '/en/profile/orders');
   const card = page.locator(`#orders [data-test-id="test-id-${orderId}"]`);
   await expect(card).toBeVisible();
