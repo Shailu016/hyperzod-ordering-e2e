@@ -61,6 +61,14 @@ test.describe("Mobile storefront @mobile", () => {
 				message: "cart entry point on mobile",
 			})
 			.toBeGreaterThan(0);
+		const visibleEntry = cartEntry.filter({ visible: true }).first();
+		await expect(visibleEntry).toBeVisible();
+		await visibleEntry.click();
+		const sheet = page.locator(".v-bottom-sheet .scheme-cart-panel:visible").first();
+		await expect(sheet).toBeVisible();
+		await expect(sheet.locator("#cartItems2")).toBeVisible();
+		const items = (await require("../../utils/store").readStore(page)).items;
+		for (const item of items) await expect(sheet).toContainText(item.product_name);
 	});
 
 	test("profile and checkout routes fit the viewport", async ({ page }) => {
@@ -69,6 +77,8 @@ test.describe("Mobile storefront @mobile", () => {
 		for (const route of ["/en/profile", "/en/checkout"]) {
 			await gotoWithRetry(page, route);
 			await waitForAppBoot(page);
+			await expect(page).toHaveURL(new RegExp(route + "(?:$|[?])"));
+			await expect(page.locator(route.includes("checkout") ? "#checkout" : "#profile").first()).toBeVisible();
 			const overflow = await page.evaluate(() => {
 				const de = document.documentElement;
 				return de.scrollWidth - de.clientWidth;

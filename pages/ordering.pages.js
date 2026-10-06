@@ -11,8 +11,8 @@ class ProfilePage {
 	/** @param {import("@playwright/test").Page} page */
 	constructor(page) {
 		this.page = page;
-		this.root = page.locator("#profile").first();
-		this.sideBar = page.locator("#ProfileSideBar").first(); // id rendered twice (layout + page)
+		this.root = page.locator("#profile:visible").first();
+		this.sideBar = page.locator("#ProfileSideBar:visible").first(); // id rendered twice (layout + page)
 		this.logoutItem = page.locator('[data-test-id="test0id836jsdhGS"]').first();
 		this.editProfileBtn = page.locator('[data-test-id="testNgbezEkhT3CN"]:visible').first();
 	}

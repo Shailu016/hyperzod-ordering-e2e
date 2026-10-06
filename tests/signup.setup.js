@@ -24,6 +24,8 @@ const { deleteCurrentUserViaUI, proveUserGone } = require("../flows/user.flow");
  */
 setup("signup: purge leftovers, create user via UI and persist session @smoke", async ({ page, context }) => {
 	setup.setTimeout(300_000);
+	require("../utils/manifest").assertManagedRun();
+	require("../utils/manifest").updateManifest({ lifecycle: "setup-started" });
 
 	const missing = validateEnv();
 	expect(missing, `Missing required .env vars: ${missing.join(", ")}`).toEqual([]);
@@ -31,7 +33,8 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 	// The target URL is given by you (BASE_URL). Fail fast with a plain
 	// message when it is unreachable instead of timing out inside the browser.
 	try {
-		const res = await fetch(config.baseURL, { method: "HEAD" });
+		const res = await fetch(config.baseURL, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
+		if (!res.ok) throw new Error(`Store preflight returned HTTP ${res.status}`);
 		console.log(`[setup] target reachable: ${config.baseURL} (HTTP ${res.status})`);
 	} catch (err) {
 		throw new Error(
@@ -58,6 +61,8 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 	if (probe.data && probe.data.user_exists) {
 		console.log("[setup] leftover user from a previous run - purging for fresh data");
 		await completeLogin(page, { password: testUser.password, intentBody: probe });
+		const previous = await expectLoggedInUser(page, testUser.email);
+		require("../utils/policy").assertIdentity(previous, testUser.email);
 		await gotoWithRetry(page, "/en/profile");
 		await waitForAppBoot(page);
 		await deleteCurrentUserViaUI(page, "setup-purge");
@@ -83,7 +88,7 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 		// Lost a race with a concurrent run - fall back to login so the suite
 		// stays self-healing instead of failing the whole pipeline.
 		await completeLogin(page, { password: testUser.password, intentBody: intent });
-		mode = "login";
+		throw new Error("Test identity was concurrently recreated; refusing to share another run's account");
 	} else {
 		await completeSignupForm(page, testUser);
 	}
@@ -94,6 +99,7 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 	// User object hydrates a beat after the token - poll via helper.
 	const user = await expectLoggedInUser(page, testUser.email);
 
+	require("../utils/manifest").updateManifest({ userId: user.id, lifecycle: "authenticated" });
 	ensureAuthDir();
 	await context.storageState({ path: STORAGE_STATE });
 	fanOutStorageStates();

@@ -8,3 +8,5 @@ scheduled-logs/
 *.log
 *-DONE.txt
 __pycache__/
+
+.monitor/

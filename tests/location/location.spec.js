@@ -24,6 +24,11 @@ test.describe("Location gate @smoke @location", () => {
 		});
 		expect(persisted, "serviceable location must be persisted").toBeTruthy();
 		expect(await hasSelectedLocation(page)).toBeTruthy();
+		const location = (await require("../../utils/store").readStore(page)).location;
+		await gotoWithRetry(page, "/");
+		await expect(page).toHaveURL(/\/(home|m)(\/|$)/);
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await expect.poll(async () => (await require("../../utils/store").readStore(page)).location).toEqual(location);
 	});
 
 	test("service-area map page renders without boot error", async ({ page }) => {
@@ -34,14 +39,21 @@ test.describe("Location gate @smoke @location", () => {
 		expect(/boot-failed|boot-error/.test(page.url())).toBeFalsy();
 		await expect
 			.poll(async () => page.url(), { timeout: 30_000 })
-			.toMatch(/service-area|home|welcome/);
+			.toMatch(/service-area/);
+		await expect(page.locator("#serviceArea")).toBeVisible();
+		await expect(page.locator("#serviceArea canvas:visible, #serviceArea .gm-style:visible").first()).toBeVisible();
 	});
 
-	test("search page location input is usable", async ({ page }) => {
+	test("search page accepts typed global-search input", async ({ page }) => {
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
 		await gotoWithRetry(page, "/en/search");
 		await waitForAppBoot(page);
 		await expect(page.locator("#MultiVendorSearch")).toBeVisible({ timeout: 60_000 });
+		const input = page.locator("#mobileSearchInput:visible, #navSearchBar:visible").first();
+		await expect(input).toBeEditable();
+		await input.fill("");
+		await input.pressSequentially("e2e-fixture", { delay: 50 });
+		await expect(input).toHaveValue("e2e-fixture");
 	});
 });

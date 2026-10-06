@@ -58,53 +58,54 @@ async function selectFirstPopupOptions(page) {
 			.locator('[data-test-id^="testPsOvvHqrtk1n"]:not(.option-out-of-stock)')
 			.first();
 		if (await row.isVisible().catch(() => false)) {
-			await row.click().catch(() => {});
+			await row.click();
 		}
 	}
 }
 
-async function addFirstProductToCart(page) {
-	// Under backend throttling the product popup and cart sync can lag several
-	// seconds, and the Add button can sit under a transient overlay:
-	// re-locate + retry click and sync as a unit.
-	for (let round = 1; round <= 3; round++) {
-		const addBtn = page.locator(".add-product-btn .add-btn:visible").first();
-		await expect(addBtn, "an Add button on the merchant menu").toBeVisible({
-			timeout: 90_000,
-		});
-		const cartUpdate = page
-			.waitForResponse(
-				(r) =>
-					r.url().includes(API.cart) &&
-					["POST", "PUT"].includes(r.request().method()) &&
-					r.status() === 200,
-				{ timeout: 45_000 }
-			)
-			.catch(() => null);
-		await addBtn.click({ timeout: 15_000 }).catch(() => {
-			console.log(`[cart] add click missed (round ${round}) - retrying`);
-		});
-		// Product with options/instructions -> popup with its own Add button.
-		const popupAdd = page
-			.locator('[data-test-id="testNraKiacTeqVn"], .product-popup .add-btn')
-			.first();
-		try {
-			await popupAdd.waitFor({ state: "visible", timeout: 15_000 });
-			await selectFirstPopupOptions(page);
-			await popupAdd.click();
-		} catch {
-			/* simple product */
-		}
-		await confirmDialogIfShown(page);
-		const resp = await cartUpdate;
-		if (resp) {
-			const body = await resp.json();
-			expect(body.success, `cart update failed: ${JSON.stringify(body).slice(0, 300)}`).toBeTruthy();
-			return body.data;
-		}
-		console.log(`[cart] no cart sync after add (round ${round}) - retrying`);
+async function ensureEmptyCart(page) {
+	const { readStore } = require("../utils/store");
+	let state = await readStore(page);
+	if (!(state.items || []).length) return;
+	const entry = page.locator('button:has(span.scheme-floating-cart-divider):visible, [data-test-id="nnHtWB68sfXf5vc"]:visible').first();
+	await expect(entry).toBeVisible();
+	await entry.click();
+	const panel = page.locator(".scheme-cart-panel:visible").first();
+	await expect(panel).toBeVisible();
+	for (let clicks = 0; clicks < 50 && (state.items || []).length; clicks++) {
+		const before = state.items.reduce((sum, line) => sum + Number(line.quantity), 0);
+		const minus = panel.locator(".decrement-btn:visible").first();
+		await expect(minus).toBeEnabled();
+		await minus.click();
+		await expect.poll(async () => {
+			state = await readStore(page);
+			return (state.items || []).reduce((sum, line) => sum + Number(line.quantity), 0);
+		}, { timeout: 15_000 }).toBeLessThan(before);
 	}
-	throw new Error("cart update API call never completed after adding a product (3 rounds)");
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await require("../utils/app").waitForAppBoot(page);
+	await expect.poll(async () => (await readStore(page)).items.length).toBe(0);
+}
+
+async function addFirstProductToCart(page) {
+	await ensureEmptyCart(page);
+	const add = page.locator(".add-product-btn .add-btn:visible").first();
+	await expect(add).toBeEnabled();
+	const waiting = page.waitForResponse(r => new URL(r.url()).pathname === API.cart && ["POST", "PUT"].includes(r.request().method()), { timeout: 45_000 });
+	waiting.catch(() => {});
+	await add.click();
+	const popupAdd = page.locator('[data-test-id="testNraKiacTeqVn"]:visible, .product-popup .add-btn:visible').first();
+	const shown = await popupAdd.waitFor({ state: "visible", timeout: 3_000 }).then(() => true, () => false);
+	if (shown) { await selectFirstPopupOptions(page); await popupAdd.click(); }
+	await confirmDialogIfShown(page);
+	const response = await waiting;
+	expect(response.ok(), "cart HTTP response").toBeTruthy();
+	const body = await response.json();
+	expect(body.success, "cart mutation succeeded").toBe(true);
+	const state = await require("../utils/store").readStore(page);
+	require("../utils/policy").cartLines(state.items);
+	expect(state.items.length, "cart has exactly the requested fixture").toBeGreaterThan(0);
+	return state.cart;
 }
 
 async function ensureDeliveryAddress(page) {
@@ -139,7 +140,9 @@ async function ensureDeliveryAddress(page) {
 		if (await selectPrompt.isVisible().catch(() => false)) {
 			await selectPrompt.click();
 		} else {
-			return; // pickup-style order types don't need an address
+			const state = await require("../utils/store").readStore(page);
+			if (!["pickup", "dine_in"].includes(state.orderType || state.validation?.order_type)) throw new Error("Delivery address UI is missing for a delivery order");
+			return;
 		}
 	}
 	const selectPanel = page.locator("#SelectAddress");
@@ -212,21 +215,16 @@ async function ensureDeliveryAddress(page) {
  * @returns {Promise<string>} chosen method label
  */
 async function chooseCashPayment(page) {
-	if (await ensureLoggedIn(page)) {
-		throw new SessionRenewedError();
-	}
-	const methods = page.locator("#payment-card .payment-method");
-	await expect(methods.first(), "at least one payment method").toBeVisible({
-		timeout: 60_000,
-	});
-	const cash = methods.filter({ hasText: /cash|cod|delivery/i }).first();
-	if (await cash.isVisible().catch(() => false)) {
-		await cash.click();
-		return "cash";
-	}
-	throw new Error(
-		"SKIP-BY-POLICY: no Cash/COD method available and payment gateways are out of scope - cannot place order without opening an external gateway."
-	);
+	const { readStore } = require("../utils/store");
+	const { isCashMode } = require("../utils/policy");
+	await expect.poll(async () => (await readStore(page)).paymentModes?.length || 0).toBeGreaterThan(0);
+	const cash = (await readStore(page)).paymentModes.find(isCashMode);
+	if (!cash) throw new Error("Required fixture has no supported offline Cash/COD payment mode");
+	const row = page.locator('#payment-card [data-test-id="testhsdgs7123ds-' + cash.payment_mode.name + '"]:visible').first();
+	await expect(row).toBeVisible();
+	await row.click();
+	await expect.poll(async () => String((await readStore(page)).paymentModeId)).toBe(String(cash.payment_mode_id));
+	return cash;
 }
 
 async function handleScheduleDialogIfShown(page) {
@@ -245,7 +243,7 @@ async function handleScheduleDialogIfShown(page) {
 	await timeBtn.waitFor({ state: "visible", timeout: 20_000 });
 	await timeBtn.click();
 	await dialog.locator(".v-card-actions .v-btn").last().click();
-	await dialog.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+	await dialog.waitFor({ state: "hidden", timeout: 15_000 });
 	return true;
 }
 
@@ -256,7 +254,7 @@ async function handleScheduleDialogIfShown(page) {
 function placeOrderButton(page) {
 	// .first(): desktop and mobile markups are exclusive per layout, but the
 	// helper must never go strict-mode multi-match if both ever render.
-	return page.locator("#OrderPlaceButton, .mobile-place-order-btn").first();
+	return page.locator("#OrderPlaceButton:visible, .mobile-place-order-btn:visible").first();
 }
 
 /**
@@ -285,7 +283,7 @@ async function gotoCheckout(page, cartId) {
 			lastBounce = err;
 			if (attempt === 3) break;
 			console.log(`[checkout] bounced out of checkout (attempt ${attempt}) - waiting 20s, re-navigating`);
-			await page.waitForTimeout(20_000);
+			await page.waitForTimeout(2_000);
 			continue;
 		}
 		// Phase 2: session check. Renewal failures propagate immediately -
@@ -308,6 +306,7 @@ module.exports = {
 	confirmDialogIfShown,
 	selectFirstPopupOptions,
 	addFirstProductToCart,
+	ensureEmptyCart,
 	ensureDeliveryAddress,
 	chooseCashPayment,
 	handleScheduleDialogIfShown,

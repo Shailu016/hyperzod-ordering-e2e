@@ -97,3 +97,11 @@ test.describe("Authentication - login/logout of the signed-up user @smoke @auth"
 		expect(await isLoggedIn(page), "user must stay logged out").toBeFalsy();
 	});
 });
+
+test('logged-out browser cannot read a protected order history @smoke @auth', async ({ page }) => {
+	await ensureLocation(page);
+	expect(await isLoggedIn(page)).toBe(false);
+	await gotoWithRetry(page, '/en/profile/orders');
+	await expect(page).not.toHaveURL(/profile\/orders/);
+	await expect(page.locator('#orders:visible')).toHaveCount(0);
+});

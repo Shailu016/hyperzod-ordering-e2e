@@ -58,7 +58,13 @@ test.describe("Checkout states @checkout", () => {
 				{ timeout: 90_000, message: "place order button should hydrate" }
 			)
 			.toBeGreaterThan(0);
-		// Bill rows render inside checkout; at minimum totals text is present.
+		const state = await require("../../utils/store").readStore(page);
+		require("../../utils/policy").validateBill(state.cart);
+		const panel = page.locator("#checkout");
+		for (const key of ["sub_total_amount_formatted", "total_amount_formatted", "delivery_fee_formatted", "tax_formatted", "packaging_charge_formatted"]) {
+			if (state.cart[key] && state.cart[key] !== "0") await expect(panel).toContainText(state.cart[key]);
+		}
+		// Visible bill and backend line amounts must agree.
 		const bodyText = (await page.locator("#checkout").innerText()).toLowerCase();
 		expect(
 			/total|subtotal|delivery|amount|payable/.test(bodyText),
@@ -69,7 +75,9 @@ test.describe("Checkout states @checkout", () => {
 	test("address selection persists for delivery orders", async ({ page }) => {
 		const addressCard = page.locator("#AddressCard");
 		if (!(await addressCard.isVisible().catch(() => false))) {
-			test.skip(true, "order type needs no delivery address (pickup-style)");
+			const state = await require("../../utils/store").readStore(page);
+			expect(["pickup", "dine_in"]).toContain(state.orderType || state.validation?.order_type);
+			test.skip(true, "declared pickup fixture has no delivery address");
 			return;
 		}
 		await ensureDeliveryAddress(page);
@@ -82,21 +90,14 @@ test.describe("Checkout states @checkout", () => {
 			}
 		});
 		expect(persisted, "delivery address stays selected").toBeTruthy();
+		const address = (await require("../../utils/store").readStore(page)).address;
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await waitForAppBoot(page);
+		await expect.poll(async () => (await require("../../utils/store").readStore(page)).address).toEqual(address);
 	});
 
 	test("payment section lists Cash/COD when tenant offers it", async ({ page }) => {
-		const methods = page.locator("#payment-card .payment-method");
-		await expect(methods.first(), "payment methods listed").toBeVisible({
-			timeout: 60_000,
-		});
-		const text = ((await methods.allInnerTexts()).join(" | ") || "").toLowerCase();
-		if (!/cash|cod|delivery/.test(text)) {
-			test.skip(
-				true,
-				`tenant offers no COD method (offers: ${text.slice(0, 120)}) - gateways out of scope`
-			);
-			return;
-		}
-		expect(/cash|cod|delivery/.test(text)).toBeTruthy();
+		const chosen = await require("../../flows/order.flow").chooseCashPayment(page);
+		expect(require("../../utils/policy").isCashMode(chosen)).toBe(true);
 	});
 });

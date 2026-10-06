@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": false,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "CommonJS",
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ]
+  },
+  "include": [
+    "utils/policy.js",
+    "utils/lease.js",
+    "utils/manifest.js",
+    "scripts/summarize.js",
+    "scripts/check-schedule.js"
+  ]
+}

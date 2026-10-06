@@ -1,54 +1,30 @@
-// @ts-check
-/**
- * Poor-man's lint for this suite (no eslint dependency by design):
- *  1. `node --check` every JS file under fixtures/flows/pages/tests/utils.
- *  2. `playwright test --list` to prove every module loads (import errors).
- * Exit non-zero on any failure. Run via `npm run lint`, also wired into CI.
- */
-const { execFileSync } = require("child_process");
-const path = require("path");
-const fs = require("fs");
-
-const root = path.join(__dirname, "..");
-const dirs = ["fixtures", "flows", "pages", "tests", "utils"];
-const extraFiles = ["playwright.config.js", "scripts/syntax-check.js", "scripts/check-env.js"];
-let failed = false;
-
-function jsFiles(dir) {
-	const out = [];
-	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-		const full = path.join(dir, entry.name);
-		if (entry.isDirectory()) out.push(...jsFiles(full));
-		else if (entry.name.endsWith(".js")) out.push(full);
-	}
-	return out;
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const YAML = require('yaml');
+const root = path.resolve(__dirname, '..');
+function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]);
 }
-
-function checkFile(file) {
-	try {
-		execFileSync(process.execPath, ["--check", file], { stdio: "pipe" });
-	} catch {
-		console.error(`SYNTAX FAIL: ${path.relative(root, file)}`);
-		failed = true;
-	}
-}
-
-for (const dir of dirs) {
-	for (const file of jsFiles(path.join(root, dir))) checkFile(file);
-}
-for (const rel of extraFiles) checkFile(path.join(root, rel));
-
+const files = ['fixtures','flows','pages','tests','utils','scripts','tests-unit'].flatMap((dir) => walk(path.join(root,dir)));
 try {
-	execFileSync("npx", ["playwright", "test", "--list"], {
-		cwd: root,
-		stdio: "pipe",
-		shell: true,
-	});
-} catch (err) {
-	console.error("PLAYWRIGHT --list FAILED (import error in suite)");
-	console.error(String((err && err.message) || err).slice(0, 500));
-	failed = true;
+  for (const file of [...files, path.join(root,'playwright.config.js')].filter((file) => /\.(js|cjs)$/.test(file))) {
+    execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+    if (file.startsWith(path.join(root,'tests') + path.sep) && /\btest(?:\.describe)?\.only\s*\(/.test(fs.readFileSync(file,'utf8'))) throw new Error(`Focused test forbidden: ${file}`);
+  }
+  for (const file of [...walk(path.join(root,'.github/workflows')), path.join(root,'bitbucket-pipelines.yml')]) {
+    const document = YAML.parseDocument(fs.readFileSync(file,'utf8'), { uniqueKeys: true });
+    if (document.errors.length) throw new Error(`${file}: ${document.errors.map((error) => error.message).join('; ')}`);
+  }
+  const installed = require('@playwright/test/package.json').version;
+  for (const file of [path.join(root,'bitbucket-pipelines.yml'), ...walk(path.join(root,'.github/workflows'))]) {
+    const image = fs.readFileSync(file,'utf8').match(/mcr\.microsoft\.com\/playwright:v([\d.]+)-/);
+    if (image && image[1] !== installed) throw new Error(`Playwright image/package mismatch: ${file}`);
+  }
+  execFileSync(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--list'], { cwd: root, stdio: 'pipe' });
+  execFileSync(process.execPath, [path.join(path.dirname(require.resolve('typescript/package.json')), 'bin', 'tsc'), '--noEmit'], { cwd: root, stdio: 'pipe' });
+  console.log('LINT: OK (JS syntax, focused-test guard, YAML, version alignment, imports and critical module types)');
+} catch (error) {
+  console.error(error.stdout?.toString() || error.message);
+  process.exitCode = 1;
 }
-
-console.log(failed ? "LINT: FAIL" : "LINT: OK");
-process.exit(failed ? 1 : 0);

@@ -4,22 +4,28 @@
 	"private": true,
 	"description": "Playwright end-to-end tests for the Hyperzod consumer ordering UI (hyperzod-ui-ordering)",
 	"scripts": {
-		"test": "playwright test",
-		"test:web": "playwright test --project=setup --project=web --project=cleanup",
-		"test:android": "playwright test --project=setup --project=android --project=cleanup",
-		"test:ios": "playwright test --project=setup --project=ios --project=cleanup",
-		"test:mobile": "playwright test --project=setup --project=android --project=ios --project=cleanup",
-		"test:smoke": "playwright test --project=setup --project=web --project=cleanup --grep @smoke",
-		"test:headed": "playwright test --headed",
-		"test:ui": "playwright test --ui",
-		"test:signup": "playwright test --project=setup",
-		"test:debug": "playwright test --debug",
+		"test": "node scripts/run-suite.js all",
+		"test:web": "node scripts/run-suite.js web",
+		"test:android": "node scripts/run-suite.js android",
+		"test:ios": "node scripts/run-suite.js ios",
+		"test:mobile": "node scripts/run-suite.js mobile",
+		"test:smoke": "node scripts/run-suite.js smoke",
+		"test:headed": "node scripts/run-suite.js web --headed",
+		"test:ui": "node scripts/run-suite.js web --ui",
+		"test:signup": "node scripts/run-suite.js signup",
+		"test:debug": "node scripts/run-suite.js web --debug",
 		"lint": "node scripts/syntax-check.js",
 		"check:env": "node scripts/check-env.js",
-		"report": "playwright show-report"
+		"report": "node scripts/report.js",
+		"test:unit": "node scripts/unit-tests.js",
+		"check:types": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@playwright/test": "^1.48.2",
-		"dotenv": "^16.4.5"
+		"@axe-core/playwright": "4.13.0",
+		"@playwright/test": "1.61.1",
+		"@types/node": "22.20.5",
+		"dotenv": "^16.4.5",
+		"typescript": "7.0.2",
+		"yaml": "2.8.1"
 	}
 }

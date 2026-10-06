@@ -34,15 +34,15 @@ function backoffMs(attempt, baseMs = 5_000, capMs = 75_000) {
  * @throws the last error when attempts are exhausted
  */
 async function retryAsync(fn, opts = {}) {
-	const { attempts = 3, baseMs = 5_000, capMs = 75_000, label = "step", onRetry } = opts;
+	const { attempts = 3, baseMs = 5_000, capMs = 75_000, label = "step", onRetry, shouldRetry = () => true, deadline = Date.now() + 120_000 } = opts;
 	let lastError = null;
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
 			return await fn();
 		} catch (err) {
 			lastError = err;
-			if (attempt === attempts) break;
-			const waitMs = backoffMs(attempt, baseMs, capMs);
+			if (attempt === attempts || !shouldRetry(err) || Date.now() >= deadline) break;
+			const waitMs = Math.min(backoffMs(attempt, baseMs, capMs), Math.max(0, deadline - Date.now()));
 			await sleep(waitMs);
 			if (onRetry) {
 				try {

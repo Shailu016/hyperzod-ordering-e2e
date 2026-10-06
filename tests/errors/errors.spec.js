@@ -13,6 +13,7 @@ test.describe("Error pages @errors", () => {
 		await gotoWithRetry(page, "/en/page/terms");
 		await waitForAppBoot(page);
 		expect(/boot-failed|boot-error/.test(page.url())).toBeFalsy();
-		await expect(page.locator("#app-router-view, #app").first()).toBeVisible();
+		await expect(page).toHaveURL(/\/page\/terms/);
+		await expect(page.getByRole("heading", { name: /terms/i }).first()).toBeVisible();
 	});
 });

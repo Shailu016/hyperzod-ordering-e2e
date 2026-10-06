@@ -46,3 +46,11 @@ test.describe("Session handling @auth", () => {
 		await expect(profile.sideBar, "profile sidebar").toBeVisible({ timeout: 60_000 });
 	});
 });
+
+test('expired local session logs out without automatic renewal @auth', async ({ page }) => {
+	await ensureLocation(page);
+	expect(await isLoggedIn(page)).toBe(true);
+	await page.evaluate(() => localStorage.setItem('token_expires_in', JSON.stringify(Date.now() - 1_000)));
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await expect.poll(async () => isLoggedIn(page)).toBe(false);
+});
