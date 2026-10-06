@@ -31,7 +31,9 @@ const testUser = {
 const config = {
 	locationQuery: process.env.TEST_LOCATION_QUERY || "Indore",
 	fallbackOtp: process.env.TEST_FALLBACK_OTP || "1234",
-	baseURL: process.env.BASE_URL || "https://automations-store.hyperzod.me",
+	// No fallback: an empty target must fail loudly in setup's preflight,
+	// never silently test the wrong deployment.
+	baseURL: process.env.BASE_URL || "",
 };
 
 function ensureAuthDir() {
@@ -59,6 +61,7 @@ function readUserMeta() {
  */
 function validateEnv() {
 	const missing = [];
+	if (!config.baseURL) missing.push("BASE_URL");
 	if (!testUser.email) missing.push("TEST_USER_EMAIL");
 	if (!testUser.phone) missing.push("TEST_USER_PHONE");
 	if (!testUser.password) missing.push("TEST_USER_PASSWORD");

@@ -10,6 +10,8 @@ Env:
   SLACK_WEBHOOK_URL - Slack incoming-webhook URL (GitHub secret).
   E2E_SUITE_LABEL   - human label, e.g. "full matrix" / "smoke".
   BASE_URL          - store under test (shown in the message).
+  DRY_RUN=1         - print the payload instead of POSTing (local testing,
+                      never touches Slack).
   GitHub context (optional): GITHUB_SERVER_URL, GITHUB_REPOSITORY,
   GITHUB_RUN_ID, GITHUB_RUN_NUMBER - used to link the run.
 """
@@ -23,8 +25,9 @@ JUNIT = os.path.join("test-results", "junit.xml")
 
 
 def main() -> int:
+    dry = os.environ.get("DRY_RUN", "") == "1"
     webhook = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
-    if not webhook:
+    if not webhook and not dry:
         print("notify-slack: no SLACK_WEBHOOK_URL, skipping")
         return 0
     if not os.path.exists(JUNIT):
@@ -85,6 +88,9 @@ def main() -> int:
             }
         ],
     }
+    if dry:
+        print(json.dumps(payload, indent=2)[:2000])
+        return 0
     try:
         req = urllib.request.Request(
             webhook,

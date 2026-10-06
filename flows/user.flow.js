@@ -16,6 +16,7 @@ const {
 	submitLoginIntent,
 	isLoggedIn,
 	gotoWithRetry,
+	wipeAuthKeepLocation,
 	API,
 } = require("../utils/app");
 
@@ -114,9 +115,8 @@ async function deleteCurrentUserViaUI(page, logPrefix) {
  */
 async function proveUserGone(page, email, logPrefix) {
 	const tag = logPrefix || "user";
-	await page.context().clearCookies();
+	await wipeAuthKeepLocation(page);
 	await gotoWithRetry(page, "/");
-	await page.evaluate(() => localStorage.clear());
 	await ensureLocation(page);
 	await openAuthPanel(page);
 	const result = await submitLoginIntent(page, email);

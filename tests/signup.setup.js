@@ -6,7 +6,7 @@ const {
 	submitLoginIntent,
 	completeLogin,
 	completeSignupForm,
-	loggedInUserFromStore,
+	expectLoggedInUser,
 	expectLoggedIn,
 	waitForAppBoot,
 	gotoWithRetry,
@@ -91,17 +91,8 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 
 	await expectLoggedIn(page);
 
-	// The user object can hydrate a beat after the token lands (tenant
-	// variance) - poll instead of asserting the vuex snapshot instantly.
-	let user = null;
-	await expect
-		.poll(
-			async () => (user = await loggedInUserFromStore(page)),
-			{ timeout: 30_000, message: "logged-in user in the vuex store" }
-		)
-		.toBeTruthy();
-	expect(user, "logged-in user must be present in the vuex store").toBeTruthy();
-	expect(String(user.email || "").toLowerCase()).toBe(testUser.email);
+	// User object hydrates a beat after the token - poll via helper.
+	const user = await expectLoggedInUser(page, testUser.email);
 
 	ensureAuthDir();
 	await context.storageState({ path: STORAGE_STATE });

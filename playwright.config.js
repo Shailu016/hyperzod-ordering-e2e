@@ -9,7 +9,16 @@ const { AUTH_DIR, PROJECTS, storageStateFor: stateFor, ensureAuthDir } = require
 // Single test target for the whole suite (see .env.example).
 // All testing happens against the store deployment below -
 // no dev server is ever started for it.
-const BASE_URL = (process.env.BASE_URL || "https://automations-store.hyperzod.me").replace(/\/$/, "");
+//
+// Empty BASE_URL fails LOUDLY here (before any browser launches) instead of
+// dying later as "Cannot navigate to invalid URL". Local runs set it via
+// .env (gitignored); CI sets it via the E2E_BASE_URL secret.
+const BASE_URL = (process.env.BASE_URL || "").replace(/\/$/, "");
+if (!BASE_URL) {
+	throw new Error(
+		"BASE_URL is empty: set it in .env (local) or the E2E_BASE_URL secret (CI) to the store URL, e.g. https://automations-store.hyperzod.me/"
+	);
+}
 const ORDERING_UI_DIR =
 	process.env.ORDERING_UI_DIR || "C:\\Hyperzod_repo\\hyperzod-ui-ordering";
 const IS_LOCAL_TARGET = /localhost|127\.0\.0\.1/.test(BASE_URL);

@@ -7,6 +7,7 @@ const {
 	submitLoginIntent,
 	completeLogin,
 	gotoWithRetry,
+	wipeAuthKeepLocation,
 	loggedInUserFromStore,
 } = require("../utils/app");
 const { testUser, readUserMeta } = require("../utils/env");
@@ -31,11 +32,13 @@ teardown("delete the test user account via UI @smoke", async ({ page }) => {
 	console.log(`[cleanup] candidates: ${candidates.join(", ") || "(none)"}`);
 
 	for (const email of candidates) {
-		// Deterministic slate per candidate: wipe auth + storage first so a
-		// stale session can never delete the wrong user.
-		await page.context().clearCookies();
+		// Deterministic slate per candidate: wipe the SESSION but keep
+		// location (a full storage wipe summons the forced location drawer,
+		// which covers the header). A stale session can never delete the
+		// wrong user: login below is always for this candidate's email and
+		// the session email is verified before deleting.
+		await wipeAuthKeepLocation(page);
 		await gotoWithRetry(page, "/");
-		await page.evaluate(() => localStorage.clear());
 		await ensureLocation(page);
 		await openAuthPanel(page);
 

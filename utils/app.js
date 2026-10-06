@@ -172,22 +172,56 @@ async function ensureLocation(page) {
 	await waitForAppBoot(page);
 
 	// Already redirected away from welcome: location is settled only if it
-	// is persisted AND no forced location drawer is open (verified live: the
-	// app can sit on home with "Search for your location" demanding input
-	// while storage looks empty-but-harmless).
+	// is persisted AND no forced location drawer is open. CAUTION: the
+	// drawer can FLASH during boot while location resolves (verified live:
+	// healthy home page behind a 2s drawer) - so a visible drawer alone
+	// proves nothing until it persists with no location behind it.
 	if (!(await page.locator("#WelcomePage").isVisible().catch(() => false))) {
-		const drawerOpen = await page
-			.getByText(/search for your location/i)
-			.first()
-			.isVisible()
-			.catch(() => false);
-		if (!drawerOpen && (await hasSelectedLocation(page))) return;
-		// Satisfy the drawer the same way as welcome: type the query in the
-		// drawer's own search box and pick the first suggestion.
-		const drawerSearch = page.getByPlaceholder(/search for area/i).first();
-		if (drawerOpen && (await drawerSearch.isVisible().catch(() => false))) {
+		const heading = page.getByText(/search for your location/i).first();
+		const openNow = await heading.isVisible().catch(() => false);
+		const locatedNow = await hasSelectedLocation(page).catch(() => false);
+		if (!openNow && locatedNow) return; // settled, common case
+		if (openNow && !locatedNow) {
+			// Flash or stuck? The app can auto-resolve location (and close
+			// the drawer itself) ~20s into boot - give it 30s to settle on
+			// its own before touching anything.
+			const resolved = await expect
+				.poll(
+					async () => {
+						if (await hasSelectedLocation(page).catch(() => false)) return "settled";
+						if (!(await heading.isVisible().catch(() => false))) return "closed";
+						return "waiting";
+					},
+					{ timeout: 30_000 }
+				)
+				.toMatch(/settled|closed/)
+				.then(() => true)
+				.catch(() => false);
+			if (resolved) {
+				console.log("[location] transient drawer resolved on its own - proceeding");
+				return;
+			}
+			// Genuinely stuck: satisfy it the same way as welcome - type the
+			// query in the drawer's own search box, pick the first suggestion.
+			// Re-verify openness first: it may have closed in the gap.
+			if (!(await heading.isVisible().catch(() => false))) {
+				console.log("[location] drawer closed during settle check - proceeding");
+				return;
+			}
 			console.log("[location] forced location drawer open - selecting via drawer");
-			await drawerSearch.click();
+			const drawerSearch = page.getByPlaceholder(/search for area/i).first();
+			try {
+				await drawerSearch.click({ timeout: 8_000 });
+			} catch {
+				// Covered/animating: one last state check before failing loudly.
+				if (!(await heading.isVisible().catch(() => false))) {
+					console.log("[location] drawer gone after click miss - proceeding");
+					return;
+				}
+				throw new Error(
+					"location drawer search box present but not clickable (covered by overlay?)"
+				);
+			}
 			await drawerSearch.pressSequentially(config.locationQuery, { delay: 80 });
 			const drawerResults = page.locator(
 				".search-results .results-list .tw-cursor-pointer"
@@ -411,6 +445,25 @@ async function expectAuthedUI(page) {
 		.toBeTruthy();
 }
 
+/** Assert the logged-in user object, which can hydrate a beat after the
+ *  token lands (verified live: token present, object null). Polls instead of
+ *  asserting the vuex snapshot instantly. @returns the user object. */
+async function expectLoggedInUser(page, email, timeout = 30_000) {
+	let user = null;
+	await expect
+		.poll(async () => (user = await loggedInUserFromStore(page)), {
+			timeout,
+			message: "logged-in user object in the vuex store",
+		})
+		.toBeTruthy();
+	if (email) {
+		expect(String(user.email || "").toLowerCase(), "logged-in user email").toBe(
+			String(email).toLowerCase()
+		);
+	}
+	return user;
+}
+
 /** True when the app currently has an authenticated session. */
 async function isLoggedIn(page) {
 	return await page.evaluate(() => {
@@ -421,6 +474,32 @@ async function isLoggedIn(page) {
 			return !!(vuex.User && vuex.User.isLoggedIn);
 		} catch {
 			return false;
+		}
+	});
+}
+
+/** Wipe auth state but KEEP location. The location drawer is forced
+ *  open only when the app considers location unset - a full storage wipe
+ *  summons it and it covers the header. Clearing just the session (token +
+ *  User subtree) keeps location settled so auth entry points stay clickable.
+ *  After this, isLoggedIn(page) is guaranteed false. */
+async function wipeAuthKeepLocation(page) {
+	await page.context().clearCookies();
+	await page.evaluate(() => {
+		try {
+			localStorage.removeItem('access_token');
+			localStorage.removeItem('token_expires_in');
+			const raw = localStorage.getItem('vuex');
+			if (raw) {
+				const vuex = JSON.parse(raw);
+				if (vuex.User) {
+					vuex.User.isLoggedIn = false;
+					vuex.User.loggedInUser = null;
+				}
+				localStorage.setItem('vuex', JSON.stringify(vuex));
+			}
+		} catch {
+			/* best effort - callers re-verify */
 		}
 	});
 }
@@ -631,6 +710,8 @@ module.exports = {
 	expectLoggedIn,
 	expectAuthedUI,
 	isLoggedIn,
+	wipeAuthKeepLocation,
+	expectLoggedInUser,
 	ensureLoggedIn,
 	gotoAuthed,
 	gotoWithRetry,

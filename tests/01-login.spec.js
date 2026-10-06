@@ -7,7 +7,7 @@ const {
 	completeLogin,
 	expectLoggedIn,
 	isLoggedIn,
-	loggedInUserFromStore,
+	expectLoggedInUser,
 	API,
 	gotoWithRetry,
 } = require("../utils/app");
@@ -35,8 +35,8 @@ test.describe("Authentication - login/logout of the signed-up user @smoke @auth"
 		await completeLogin(page, { password: testUser.password, intentBody: intent });
 		await expectLoggedIn(page);
 
-		const user = await loggedInUserFromStore(page);
-		expect(String(user.email || "").toLowerCase()).toBe(testUser.email);
+		// User object hydrates a beat after the token - poll via helper.
+		await expectLoggedInUser(page, testUser.email);
 
 		// -- Logout --------------------------------------------------------
 		await gotoWithRetry(page, "/en/profile");
