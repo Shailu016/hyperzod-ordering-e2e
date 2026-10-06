@@ -8,6 +8,8 @@ Use the existing `npm run test:smoke`, `test:web`, `test:android`, `test:ios`, `
 
 No storefront tests run on a draft PR. Static and mocked regression checks can run without a storefront or webhook. A trusted, non-draft PR additionally runs smoke as an automatic gate. GitHub branch protection must require `static` and `release-gate` checks before merging; repository code cannot enforce branch protection by itself. The release gate requires successful trusted smoke execution, including for fork PRs, which need a trusted integration branch before approval.
 
+The repository's `main` protection is configured to require a pull request, an up-to-date branch, `static` and `release-gate`, and resolved review conversations, including for administrators. Force pushes and branch deletion are disabled. Zero approving reviews are required so the repository owner can use the PR workflow without needing a second account; CI and the draft/ready state still gate promotion. These settings are applied through GitHub and must also be configured if this project is copied to another repository.
+
 **Identity coordination**
 
 All live invocations acquire an atomic GitHub tag ref `e2e-lease-<identity hash>` before touching the store. The lease is shared by local, Bitbucket and GitHub runners using the same target/email. GitHub uses its job token with `contents: write` solely for creating/releasing the ref and its ownership commit. Local runs use an authenticated `gh` CLI; Bitbucket requires `E2E_LEASE_TOKEN` with repository contents read/write. The main branch is not changed by lease acquisition.
@@ -38,4 +40,4 @@ HTTP, application-level and transport errors are captured for first-party APIs. 
 
 `npm run lint` validates JavaScript syntax, rejects focused tests, parses workflow YAML, checks Playwright image/package alignment, lists tests without executing them, and type-checks the critical policy/lease/manifest/report/scheduler modules. `npm run test:unit` uses local mocks only. Python notifier checks use mock responses: `python -m unittest discover -s tests-unit -p '*_test.py'`. The PowerShell runner invokes Node directly and preserves the aggregate exit code. Playwright package/image versions are pinned to 1.61.1.
 
-The implementation is reviewable and statically verified. Live multi-device execution, backend billing/order contracts, API identity behavior and repository required-check settings remain deployment acceptance checks; they cannot be honestly claimed verified from offline tests.
+The implementation is reviewable and statically verified. Live multi-device execution, backend billing/order contracts and API identity behavior remain deployment acceptance checks; they cannot be honestly claimed verified from offline tests.
