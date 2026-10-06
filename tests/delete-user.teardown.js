@@ -6,6 +6,7 @@ const {
 	openAuthPanel,
 	submitLoginIntent,
 	completeLogin,
+	isLoggedIn,
 	gotoWithRetry,
 	wipeAuthKeepLocation,
 	loggedInUserFromStore,
@@ -32,13 +33,17 @@ teardown("delete the test user account via UI @smoke", async ({ page }) => {
 	console.log(`[cleanup] candidates: ${candidates.join(", ") || "(none)"}`);
 
 	for (const email of candidates) {
-		// Deterministic slate per candidate: wipe the SESSION but keep
-		// location (a full storage wipe summons the forced location drawer,
-		// which covers the header). A stale session can never delete the
-		// wrong user: login below is always for this candidate's email and
-		// the session email is verified before deleting.
-		await wipeAuthKeepLocation(page);
+		// Order matters: the wipe touches localStorage, which only exists
+		// on the app origin - wiping on about:blank silently does nothing
+		// and leaves the old session alive (verified live: cleanup then
+		// fails with "no auth entry point" on a logged-in header).
 		await gotoWithRetry(page, "/");
+		await wipeAuthKeepLocation(page);
+		if (await isLoggedIn(page)) {
+			throw new Error(
+				`wipe failed to clear session for ${email} - aborting instead of acting on ambiguous auth state`
+			);
+		}
 		await ensureLocation(page);
 		await openAuthPanel(page);
 

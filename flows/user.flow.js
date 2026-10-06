@@ -115,8 +115,15 @@ async function deleteCurrentUserViaUI(page, logPrefix) {
  */
 async function proveUserGone(page, email, logPrefix) {
 	const tag = logPrefix || "user";
-	await wipeAuthKeepLocation(page);
+	// Same ordering rule as teardown: wipe on the app origin (localStorage
+	// is opaque on about:blank), then assert logged-out before proceeding.
 	await gotoWithRetry(page, "/");
+	await wipeAuthKeepLocation(page);
+	if (await isLoggedIn(page)) {
+		throw new Error(
+			`wipe failed to clear session for ${email} - aborting instead of acting on ambiguous auth state`
+		);
+	}
 	await ensureLocation(page);
 	await openAuthPanel(page);
 	const result = await submitLoginIntent(page, email);

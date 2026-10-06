@@ -135,7 +135,38 @@ async function gotoWithRetry(page, url, { timeout = 60_000 } = {}) {
 	);
 }
 
-/** True when a delivery location has already been picked (persisted by the app). */
+/**
+ * Verify the app actually rendered something interactive. With a dead
+ * session the boot can mount an empty shell (router-view present, zero
+ * content: no header, no welcome) that every helper then fails on.
+ * @returns {"ok"|"wiped"} "wiped" when recovery cleared storage (location
+ *          is gone too - the caller must run the full location flow).
+ */
+async function ensureInteractiveShell(page) {
+	const probe = () =>
+		page
+			.locator("#WelcomePage, #MultiVendorHome, header, [role='banner'], #LoginBtn, #ProfileBtn")
+			.first()
+			.isVisible()
+			.catch(() => false);
+	if (await probe()) return "ok";
+	console.log("[boot] blank shell detected - recovering");
+	if (await isLoggedIn(page).catch(() => true)) {
+		// Valuable session: reload only, never wipe another user's state.
+		await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+		await waitForAppBoot(page);
+		if (await probe()) return "ok";
+		throw new Error("app shell blank after reload with live session (backend not serving UI?)");
+	}
+	// Nothing to protect: full wipe + reboot lands on welcome.
+	await page.context().clearCookies();
+	await gotoWithRetry(page, "/");
+	await page.evaluate(() => localStorage.clear()).catch(() => {});
+	await waitForAppBoot(page);
+	return "wiped";
+}
+
+/** True when a delivery location has already been picked (persisted by the app). *//** True when a delivery location has already been picked (persisted by the app). */
 async function hasSelectedLocation(page) {
 	return await page.evaluate(() => {
 		try {
@@ -157,19 +188,21 @@ async function hasSelectedLocation(page) {
  */
 async function ensureLocation(page) {
 	const currentUrl = page.url();
-	if (
-		currentUrl &&
-		!currentUrl.startsWith("about:") &&
-		!currentUrl.startsWith("chrome")
-	) {
+	const fresh = !currentUrl || currentUrl.startsWith("about:") || currentUrl.startsWith("chrome");
+	if (!fresh) {
 		try {
-			if (await hasSelectedLocation(page)) return;
+			if (await hasSelectedLocation(page)) {
+				// Storage says settled - but verify it rendered. A "wiped"
+				// recovery also cleared location, so fall through to set it.
+				if ((await ensureInteractiveShell(page)) !== "wiped") return;
+			}
 		} catch {
 			/* fall through to full flow */
 		}
 	}
 	await gotoWithRetry(page, "/");
 	await waitForAppBoot(page);
+	await ensureInteractiveShell(page);
 
 	// Already redirected away from welcome: location is settled only if it
 	// is persisted AND no forced location drawer is open. CAUTION: the
@@ -712,6 +745,7 @@ module.exports = {
 	isLoggedIn,
 	wipeAuthKeepLocation,
 	expectLoggedInUser,
+	ensureInteractiveShell,
 	ensureLoggedIn,
 	gotoAuthed,
 	gotoWithRetry,
