@@ -535,6 +535,9 @@ async function wipeAuthKeepLocation(page) {
 			/* best effort - callers re-verify */
 		}
 	});
+	// Rebuild Vuex from the cleared storage: the mounted app still holds its old session.
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await waitForAppBoot(page);
 }
 
 /** Re-login when the stored session expired mid-run (verified live: the app

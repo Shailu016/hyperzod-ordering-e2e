@@ -33,7 +33,7 @@ const config = {
 	fallbackOtp: process.env.TEST_FALLBACK_OTP || "1234",
 	// No fallback: an empty target must fail loudly in setup's preflight,
 	// never silently test the wrong deployment.
-	baseURL: process.env.BASE_URL || "",
+	baseURL: (process.env.BASE_URL || "").trim(),
 };
 
 function ensureAuthDir() {
@@ -52,6 +52,15 @@ function readUserMeta() {
 	} catch {
 		return null;
 	}
+}
+
+/** Reject invalid targets before Playwright can navigate or print secret values. */
+function validateBaseURL(value) {
+	try {
+		const url = new URL(value);
+		if (["http:", "https:"].includes(url.protocol) && url.hostname && !url.username && !url.password) return;
+	} catch { /* report the variable name, never its secret value */ }
+	throw new Error("BASE_URL must be an absolute HTTP(S) store URL. Set BASE_URL in .env or E2E_BASE_URL in GitHub Actions secrets.");
 }
 
 /**
@@ -101,5 +110,6 @@ module.exports = {
 	saveUserMeta,
 	readUserMeta,
 	validateEnv,
+	validateBaseURL,
 	fanOutStorageStates,
 };

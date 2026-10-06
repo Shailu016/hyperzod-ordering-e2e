@@ -15,6 +15,7 @@
 		"test:signup": "playwright test --project=setup",
 		"test:debug": "playwright test --debug",
 		"lint": "node scripts/syntax-check.js",
+		"check:env": "node scripts/check-env.js",
 		"report": "playwright show-report"
 	},
 	"devDependencies": {

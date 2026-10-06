@@ -11,7 +11,7 @@ const fs = require("fs");
 
 const root = path.join(__dirname, "..");
 const dirs = ["fixtures", "flows", "pages", "tests", "utils"];
-const extraFiles = ["playwright.config.js", "scripts/syntax-check.js"];
+const extraFiles = ["playwright.config.js", "scripts/syntax-check.js", "scripts/check-env.js"];
 let failed = false;
 
 function jsFiles(dir) {

@@ -51,6 +51,7 @@ async function deleteCurrentUserViaUI(page, logPrefix) {
 					document.querySelectorAll(
 						'.scheme-edit-profile-panel [data-test-id="testRzIhfLmqO4xa"]'
 					).length > 0,
+				undefined,
 				{ timeout: 20_000 }
 			);
 			await page.waitForTimeout(2500); // async chunk + modal-fade settle

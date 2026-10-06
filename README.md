@@ -90,6 +90,16 @@ Copy `.env.example` to `.env` and adjust if needed:
 - `AUTO_START_SERVER=false` – skip auto-start when you already have the dev
   server running (local targets only).
 
+## Configuration failures in CI
+
+The gitignored local `.env` is not available to GitHub Actions. Set
+`E2E_BASE_URL` to a complete HTTP(S) store URL and `E2E_USER_PHONE` to the
+test user's phone number (digits, with the country configured separately).
+The workflow runs `npm run check:env` before lint/browser installation and
+reports invalid URLs or missing variables without printing secret values.
+You can run the same command locally. Setup failures prevent dependent
+ordering tests from running; they do not establish an ordering UI defect.
+
 ## Run
 
 ```powershell

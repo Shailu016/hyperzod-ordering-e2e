@@ -4,7 +4,7 @@ const { defineConfig, devices } = require("@playwright/test");
 const fs = require("fs");
 // Single source of truth for per-project storage states (see utils/env.js).
 // playwright.config.js must not duplicate AUTH_DIR layout.
-const { AUTH_DIR, PROJECTS, storageStateFor: stateFor, ensureAuthDir } = require("./utils/env");
+const { AUTH_DIR, PROJECTS, storageStateFor: stateFor, ensureAuthDir, validateBaseURL } = require("./utils/env");
 
 // Single test target for the whole suite (see .env.example).
 // All testing happens against the store deployment below -
@@ -13,12 +13,13 @@ const { AUTH_DIR, PROJECTS, storageStateFor: stateFor, ensureAuthDir } = require
 // Empty BASE_URL fails LOUDLY here (before any browser launches) instead of
 // dying later as "Cannot navigate to invalid URL". Local runs set it via
 // .env (gitignored); CI sets it via the E2E_BASE_URL secret.
-const BASE_URL = (process.env.BASE_URL || "").replace(/\/$/, "");
+const BASE_URL = (process.env.BASE_URL || "").trim().replace(/\/$/, "");
 if (!BASE_URL) {
 	throw new Error(
 		"BASE_URL is empty: set it in .env (local) or the E2E_BASE_URL secret (CI) to the store URL, e.g. https://automations-store.hyperzod.me/"
 	);
 }
+validateBaseURL(BASE_URL);
 const ORDERING_UI_DIR =
 	process.env.ORDERING_UI_DIR || "C:\\Hyperzod_repo\\hyperzod-ui-ordering";
 const IS_LOCAL_TARGET = /localhost|127\.0\.0\.1/.test(BASE_URL);

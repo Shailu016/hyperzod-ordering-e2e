@@ -55,6 +55,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Validate E2E configuration
+        run: npm run check:env
+
       - name: Lint (syntax + module load)
         run: npm run lint
 
