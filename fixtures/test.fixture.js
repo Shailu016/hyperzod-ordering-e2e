@@ -22,8 +22,10 @@ const test = base.test.extend({
 		async ({ page }, use, testInfo) => {
 			require("../utils/manifest").assertManagedRun();
 			const capture = startCapture(page);
+			let fixtureError;
 			try {
 				await use(capture);
+				await capture.finish();
 				if (testInfo.status === "passed") {
 					base.expect(capture.pageErrors, "unexpected application errors").toEqual([]);
 					if (!/rejects invalid credentials/.test(testInfo.title)) {
@@ -35,10 +37,14 @@ const test = base.test.extend({
 					});
 					base.expect(unexpected, "unexpected first-party network failures").toEqual([]);
 				}
+			} catch (error) {
+				fixtureError = error;
+				throw error;
 			} finally {
+				await capture.finish();
 				// testInfo.status is set by the time fixtures tear down.
-				if (testInfo.status !== testInfo.expectedStatus) {
-					const err = testInfo.error;
+				if (fixtureError || testInfo.status !== testInfo.expectedStatus) {
+					const err = fixtureError || testInfo.error;
 					await reportFailure(testInfo, page, capture, err);
 				}
 			}

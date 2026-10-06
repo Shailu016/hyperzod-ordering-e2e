@@ -51,13 +51,7 @@ test.describe("Checkout states @checkout", () => {
 	test("bill summary and place-order button render", async ({ page }) => {
 		// Desktop: #OrderPlaceButton, mobile: .mobile-place-order-btn (verified
 		// in cart-place.vue). The footer hydrates after cart validation, so poll.
-		await expect
-			.poll(
-				async () =>
-					page.locator("#OrderPlaceButton, .mobile-place-order-btn").count(),
-				{ timeout: 90_000, message: "place order button should hydrate" }
-			)
-			.toBeGreaterThan(0);
+		await expect(require("../../flows/order.flow").placeOrderButton(page), "place order button should render visibly").toBeVisible({ timeout: 30_000 });
 		const state = await require("../../utils/store").readStore(page);
 		require("../../utils/policy").validateBill(state.cart);
 		const panel = page.locator("#checkout");

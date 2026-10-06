@@ -58,7 +58,8 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 		}
 		throw new Error(`login/intent failed: ${msg}`);
 	}
-	if (probe.data && probe.data.user_exists) {
+	const exists = require("../utils/policy").intentState(probe) === "present";
+	if (exists) {
 		console.log("[setup] leftover user from a previous run - purging for fresh data");
 		await completeLogin(page, { password: testUser.password, intentBody: probe });
 		const previous = await expectLoggedInUser(page, testUser.email);
@@ -77,17 +78,14 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 		await ensureLocation(page);
 		await openAuthPanel(page);
 	}
-	const intent = (probe.data && probe.data.user_exists)
+	const intent = exists
 		? await submitLoginIntent(page, testUser.email)
 		: probe;
 	if (!intent.success) {
 		throw new Error(`login/intent failed: ${JSON.stringify(intent).slice(0, 300)}`);
 	}
 	let mode = "signup";
-	if (intent.data && intent.data.user_exists) {
-		// Lost a race with a concurrent run - fall back to login so the suite
-		// stays self-healing instead of failing the whole pipeline.
-		await completeLogin(page, { password: testUser.password, intentBody: intent });
+	if (require("../utils/policy").intentState(intent) === "present") {
 		throw new Error("Test identity was concurrently recreated; refusing to share another run's account");
 	} else {
 		await completeSignupForm(page, testUser);

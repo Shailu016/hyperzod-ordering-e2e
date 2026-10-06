@@ -4,6 +4,13 @@ function testCases(report) {
 function walk(suite) {
   return [...(suite.specs || []).flatMap((spec) => (spec.tests || []).map((test) => ({ title: spec.title, ...test }))), ...(suite.suites || []).flatMap(walk)];
 }
+function declaredSkip(test) {
+  const annotations = [...(test.annotations || []), ...(test.results || []).flatMap((result) => result.annotations || [])];
+  return annotations.some((annotation) => annotation.type === 'skip' && (
+    (test.title === 'product deep link displays product content @catalog' && annotation.description === 'Declared fixture capability: product deep links disabled') ||
+    (test.title === 'address selection persists for delivery orders' && annotation.description === 'declared pickup fixture has no delivery address')
+  ));
+}
 function summarizeReports(initial, outcomes, readFile) {
   const counts = { passed: 0, failed: 0, flaky: 0, skipped: 0, notRun: 0 };
   const issues = [];
@@ -19,7 +26,11 @@ function summarizeReports(initial, outcomes, readFile) {
       if (test.status === 'expected' && test.results?.some((r) => r.status === 'passed')) counts.passed++;
       else if (test.status === 'flaky') counts.flaky++;
       else if (test.status === 'unexpected') counts.failed++;
-      else if (test.results?.length) counts.skipped++;
+      else if (test.status === 'skipped') {
+        counts.skipped++;
+        if (!declaredSkip(test)) issues.push(`${project}: undeclared skipped coverage: ${test.title}`);
+      }
+      else if (test.results?.length) { counts.failed++; issues.push(`${project}: test did not pass: ${test.title}`); }
       else counts.notRun++;
     }
     const required = project === 'setup' ? [/signup:/, /delete the test user/] : [/signup:/, /delete the test user/, /places a COD order/];

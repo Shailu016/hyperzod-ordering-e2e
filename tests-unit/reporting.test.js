@@ -15,3 +15,16 @@ test('missing, skipped and flaky critical tests cannot produce green', () => {
   assert.equal(summarizeReports(setup, outcomes, () => { throw Error('missing'); }).status, 'failed');
   assert.equal(summarizeReports({ expectedProjects: ['web','ios'] }, outcomes, () => report()).status, 'failed');
 });
+
+test('new skipped coverage fails while the declared optional fixture skip is visible', () => {
+  const initial = { expectedProjects: ['web'] }, outcomes = [{ project: 'web', exitCode: 0, report: 'web' }];
+  const document = JSON.parse(report());
+  const extra = { title: 'new required UI check', tests: [{ status: 'skipped', results: [{ status: 'skipped' }] }] };
+  document.suites[0].specs.push(extra);
+  assert.equal(summarizeReports(initial, outcomes, () => JSON.stringify(document)).status, 'failed');
+  extra.title = 'product deep link displays product content @catalog';
+  extra.tests[0].annotations = [{ type: 'skip', description: 'Declared fixture capability: product deep links disabled' }];
+  const result = summarizeReports(initial, outcomes, () => JSON.stringify(document));
+  assert.equal(result.status, 'passed');
+  assert.equal(result.counts.skipped, 1);
+});

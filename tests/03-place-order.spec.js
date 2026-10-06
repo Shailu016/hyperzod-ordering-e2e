@@ -24,7 +24,7 @@ test('places a COD order end-to-end and sees it in order history @smoke @checkou
   const lines = cartLines(state.items);
   const bill = validateBill(state.cart);
   let submitted = 0;
-  await page.route('**/store/v1/order', async (route) => {
+  await page.route((url) => url.pathname === API.placeOrder, async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
     const payload = route.request().postDataJSON();
     if (submitted || String(payload.user_id) !== String(state.user.id) || String(payload.cart_id) !== String(state.cart.cart_id) || String(payload.payment_mode_id) !== String(payment.payment_mode_id)) return route.abort('blockedbyclient');

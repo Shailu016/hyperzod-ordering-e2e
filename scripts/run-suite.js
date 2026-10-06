@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { acquireLease } = require('../utils/lease');
+const { exportManifest } = require('../utils/manifest');
 const { assertAllowedTarget } = require('../utils/policy');
 const { summarizeReports } = require('./summarize');
 const ROOT = path.resolve(__dirname, '..');
@@ -49,6 +50,8 @@ async function run(suite = process.argv[2]) {
         child.on('error', (error) => resolve({ exitCode: 1, error: error.message }));
         child.on('exit', (exitCode, signal) => resolve({ exitCode: exitCode ?? 1, signal }));
       });
+      try { exportManifest(`${runId}-${project}`, projectDir); }
+      catch (error) { result.exitCode = 1; result.error = `Lifecycle evidence export failed: ${error.message}`; }
       outcomes.push({ project, ...result, report: path.join(projectDir, 'report.json') });
       writeSummary({ ...initial, outcomes });
     }
