@@ -75,6 +75,10 @@ function validateEnv() {
 	if (!testUser.phone) missing.push("TEST_USER_PHONE");
 	if (!testUser.password) missing.push("TEST_USER_PASSWORD");
 	if (!config.locationQuery) missing.push("TEST_LOCATION_QUERY");
+	// A dash is a nonempty placeholder, not usable CI configuration.
+	for (const name of ["TEST_USER_FIRST_NAME", "TEST_USER_EMAIL", "TEST_USER_PHONE", "TEST_USER_COUNTRY", "TEST_USER_PASSWORD", "TEST_LOCATION_QUERY", "TEST_FALLBACK_OTP"]) {
+		if (/^[-–—]+$/.test((process.env[name] || "").trim()) && !missing.includes(name)) missing.push(name);
+	}
 	return missing;
 }
 
