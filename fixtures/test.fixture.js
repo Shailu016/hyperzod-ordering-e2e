@@ -19,6 +19,9 @@ const { assessDiagnostics } = require("../utils/diagnostics");
 
 const test = base.test.extend({
 	apiDependencies: [[], { option: true }],
+	// Scenarios that intentionally reload can settle their tracked first-party
+	// API requests first, without waiting for unrelated chat/analytics traffic.
+	apiDiagnostics: async ({ _failureReporter }, use) => { await use(_failureReporter); },
 	// Auto-fixture: runs for every test without being requested.
 	_failureReporter: [
 		async ({ page, apiDependencies }, use, testInfo) => {

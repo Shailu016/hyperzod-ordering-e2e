@@ -4,6 +4,8 @@
 
 **Current scope:** the user restricted all further work to the personal GitHub repository `Shailu016/hyperzod-ordering-e2e`. Storefront and backend changes, Bitbucket work and application deployments are excluded. Earlier separately prepared storefront work was not merged or deployed and is not part of this automation pull request.
 
+**Follow-up on 10 October:** the user authorized read-only study of the UI source and E2E-only corrections. The subsequently requested live smoke run on `e1cb9da`, `1791569779958-2b8ca88a-79cc-48e8-b258-bb9e08132eec`, completed with **16 passed and 2 failed**, including passing signup, COD placement and cleanup. The latest E2E correction passes lint and 69 offline tests; controlled local browser fixtures verify startup-read settlement, wrong-user rejection and API-outage diagnostics. It has not been rerun against the deployed store. See [the failure review](FAILURE-REVIEW-2026-10-10.md) for the address defect proof and the inconclusive welcome diagnostic finding.
+
 This record covers the production-hardening revision on `fix/production-automation-hardening` in <https://github.com/Shailu016/hyperzod-ordering-e2e/pull/1>. The checked source was synchronized into the repository after preserving the original working-tree edits in a separate backup. The pull request remains in draft until the complete live acceptance gate passes.
 
 ## Prepared changes

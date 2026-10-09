@@ -100,8 +100,8 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
       void task.then(() => pending.delete(task), () => { pending.delete(task); overflow = true; });
     } else if (status >= 200 && status < 300) success();
   });
-  capture.drain = async (includeRequests = false) => {
-    const deadline = Date.now() + drainTimeoutMs;
+  capture.drain = async (includeRequests = false, timeoutMs = drainTimeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
     while (pending.size || (includeRequests && requests.size)) {
       let timer;
       try {

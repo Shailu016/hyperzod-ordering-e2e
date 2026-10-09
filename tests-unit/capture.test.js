@@ -2,6 +2,42 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { startCapture } = require('../utils/reporting');
+const { assessDiagnostics } = require('../utils/diagnostics');
+
+test('explicit API settlement waits for requests and JSON bodies without hiding a failure', async () => {
+  const previous = process.env.BASE_URL;
+  process.env.BASE_URL = 'https://automations-store.hyperzod.me';
+  try {
+    const page = new EventEmitter(), capture = startCapture(page);
+    const request = { method: () => 'GET', url: () => 'https://api.hyperzod.app/auth/v1/me', resourceType: () => 'xhr' };
+    page.emit('request', request);
+    let complete, settled = false;
+    const draining = capture.drain(true, 1_000).then(() => { settled = true; });
+    page.emit('response', { url: request.url, status: () => 200, headers: () => ({ 'content-type': 'application/json' }), request: () => request,
+      json: () => new Promise((resolve) => { complete = resolve; }) });
+    page.emit('requestfinished', request);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, 'a finished request is insufficient while its JSON inspection is pending');
+    complete({ success: false, message: 'Session invalid' });
+    await draining;
+    await capture.finish();
+    assert.equal(assessDiagnostics(capture).critical.length, 1);
+  } finally { if (previous === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = previous; }
+});
+
+test('a scenario settlement timeout preserves critical incomplete evidence', async () => {
+  const previous = process.env.BASE_URL;
+  process.env.BASE_URL = 'https://automations-store.hyperzod.me';
+  try {
+    const page = new EventEmitter(), capture = startCapture(page);
+    const request = { method: () => 'GET', url: () => 'https://api.hyperzod.app/store/v1/address', resourceType: () => 'xhr' };
+    page.emit('request', request);
+    await capture.drain(true, 10);
+    page.emit('requestfinished', request);
+    await capture.finish();
+    assert.ok(assessDiagnostics(capture).critical.some((event) => /diagnostics are incomplete/.test(event.message)));
+  } finally { if (previous === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = previous; }
+});
 
 test('deletion evidence requires a successful JSON acknowledgement and chat diagnostics retain their host', async () => {
   const previous = process.env.BASE_URL;
