@@ -46,7 +46,7 @@ async function main() {
   const previous = fs.existsSync('.monitor/state.json') ? JSON.parse(fs.readFileSync('.monitor/state.json', 'utf8')) : {};
   const notify = incidents.length > 0 && previous.fingerprint !== fingerprint;
   fs.writeFileSync('.monitor/pending.json', JSON.stringify({ fingerprint }));
-  fs.writeFileSync('.monitor/outcome.json', JSON.stringify({ status: 'infrastructure-failed', suite: 'schedule freshness', issues: incidents.flatMap((i) => i.issues.map((issue) => `${i.file}: ${issue}`)) }));
+  fs.writeFileSync('.monitor/outcome.json', JSON.stringify({ githubRunId: process.env.GITHUB_RUN_ID, status: 'infrastructure-failed', suite: 'schedule freshness', issues: incidents.flatMap((i) => i.issues.map((issue) => `${i.file}: ${issue}`)) }));
   if (!incidents.length) fs.copyFileSync('.monitor/pending.json', '.monitor/state.json');
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `notify=${notify}\n`);
   console.log(notify ? 'New schedule freshness incident' : 'No new actionable schedule change');

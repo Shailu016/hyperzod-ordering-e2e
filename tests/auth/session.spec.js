@@ -11,6 +11,7 @@ const { ProfilePage } = require("../../pages/ordering.pages");
 test.describe("Session handling @auth", () => {
 	test("session survives a full reload", async ({ page }) => {
 		await ensureLocation(page);
+		await ensureLoggedIn(page);
 		expect(await isLoggedIn(page), "setup session must be logged in").toBeTruthy();
 		// Under backend throttling the post-reload session check can 401 once;
 		// retry the reload itself before calling it a real logout.
@@ -49,6 +50,7 @@ test.describe("Session handling @auth", () => {
 
 test('expired local session logs out without automatic renewal @auth', async ({ page }) => {
 	await ensureLocation(page);
+	await ensureLoggedIn(page);
 	expect(await isLoggedIn(page)).toBe(true);
 	await page.evaluate(() => localStorage.setItem('token_expires_in', JSON.stringify(Date.now() - 1_000)));
 	await page.reload({ waitUntil: 'domcontentloaded' });

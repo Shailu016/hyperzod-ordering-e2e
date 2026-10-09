@@ -1,7 +1,7 @@
 // @ts-check
 const { test, expect } = require("../../fixtures/test.fixture");
 const { ensureLocation, ensureLoggedIn, waitForAppBoot, expectFirstMerchantCard, gotoWithRetry } = require("../../utils/app");
-const { addFirstProductToCart, confirmDialogIfShown, selectFirstPopupOptions } = require("../../flows/order.flow");
+const { addFirstProductToCart, openOrderableMerchant } = require("../../flows/order.flow");
 
 /**
  * Cart behavior @regression @cart.
@@ -12,18 +12,10 @@ const { addFirstProductToCart, confirmDialogIfShown, selectFirstPopupOptions } =
  */
 test.describe("Cart @cart", () => {
 	test.beforeEach(async ({ page }) => {
+		test.setTimeout(240_000);
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
-		await gotoWithRetry(page, "/en/home");
-		await waitForAppBoot(page);
-		const card = await expectFirstMerchantCard(page);
-		await expect(card, "merchant available").toBeVisible({ timeout: 30_000 });
-		await card.click();
-		await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
-		await expect(
-			page.locator(".add-product-btn .add-btn:visible").first(),
-			"merchant menu loads"
-		).toBeVisible({ timeout: 60_000 });
+		await openOrderableMerchant(page);
 	});
 
 	test("add product syncs cart API and cart persists across reload", async ({ page }) => {

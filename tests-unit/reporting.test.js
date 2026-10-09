@@ -8,6 +8,25 @@ test('all device reports are counted, not only the final project', () => {
   const outcomes = ['web','android','ios'].map((project) => ({ project, exitCode: 0, report: project }));
   const result = summarizeReports({ expectedProjects: ['web','android','ios'] }, outcomes, () => report());
   assert.equal(result.counts.passed, 9); assert.equal(result.status, 'passed');
+  assert.equal(result.projects.length, 3);
+  assert.ok(result.projects.every((p) => p.counts.passed === 3 && Object.values(p.critical).every((value) => value === 'passed')));
+});
+
+test('failed setup dependency coverage is not run, and Slack receives the useful API diagnostic', () => {
+  const document = JSON.parse(report());
+  document.suites[0].specs.push({ title: 'dependent UI check', tests: [{ status: 'skipped', results: [{ status: 'skipped' }] }] });
+  document.suites[0].specs.push({ title: 'addresses', tests: [{ status: 'unexpected', results: [{ status: 'failed', errors: [{ message: 'generic assertion' }], attachments: [{ name: 'api-diagnostics', path: 'diagnostics' }] }] }] });
+  const result = summarizeReports({ expectedProjects: ['web'] }, [{ project: 'web', report: 'report', exitCode: 1 }], (name) => name === 'report' ? JSON.stringify(document) : JSON.stringify({ critical: [{ message: 'this.getLoggedInUser is not a function' }] }));
+  assert.equal(result.counts.notRun, 1);
+  assert.equal(result.counts.skipped, 0);
+  assert.equal(result.failedTests[0].error, 'this.getLoggedInUser is not a function');
+});
+
+test('Playwright inline base64 diagnostic attachments supply the actionable failure reason', () => {
+  const document = JSON.parse(report());
+  document.suites[0].specs.push({ title: 'address page', tests: [{ status: 'unexpected', results: [{ status: 'failed', attachments: [{ name: 'api-diagnostics', body: Buffer.from(JSON.stringify({ critical: [{ message: 'address getter is not callable' }] })).toString('base64') }] }] }] });
+  const result = summarizeReports({ expectedProjects: ['web'] }, [{ project: 'web', report: 'report', exitCode: 1 }], () => JSON.stringify(document));
+  assert.equal(result.failedTests[0].error, 'address getter is not callable');
 });
 test('missing, skipped and flaky critical tests cannot produce green', () => {
   const setup = { expectedProjects: ['web'] }, outcomes = [{ project: 'web', exitCode: 0, report: 'web' }];

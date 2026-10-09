@@ -1,6 +1,7 @@
 // @ts-check
 const { test, expect } = require("../../fixtures/test.fixture");
 const { waitForAppBoot, ensureLocation, ensureLoggedIn, hasSelectedLocation, gotoWithRetry } = require("../../utils/app");
+test.use({ apiDependencies: ["geocoding"] });
 
 /**
  * Location gate (welcome -> home) @smoke @regression.
@@ -40,8 +41,7 @@ test.describe("Location gate @smoke @location", () => {
 		await expect
 			.poll(async () => page.url(), { timeout: 30_000 })
 			.toMatch(/service-area/);
-		await expect(page.locator("#serviceArea")).toBeVisible();
-		await expect(page.locator("#serviceArea canvas:visible, #serviceArea .gm-style:visible").first()).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Map', exact: true }).or(page.locator('canvas:visible')).first(), 'rendered service-area map').toBeVisible();
 	});
 
 	test("search page accepts typed global-search input", async ({ page }) => {

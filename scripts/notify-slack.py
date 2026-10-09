@@ -5,6 +5,27 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone, timedelta
+import re
+from urllib.parse import urlparse
+
+
+def clean(value, limit=300):
+    text = str(value)
+    text = re.sub(r"(?i)(bearer\s+)[\w.\-]+", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)((?:password|token|authorization|secret)\s*[:=]\s*)\S+", r"\1[REDACTED]", text)
+    # No notification text can create mentions or inject Slack markup.
+    return text[:limit].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("`", "'")
+
+
+def http_url(value):
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme in ("https", "http") and parsed.hostname and not parsed.username and not parsed.password:
+            return value
+    except (ValueError, TypeError):
+        pass
+    return None
 
 
 def build_payload(summary, context):
@@ -12,17 +33,62 @@ def build_payload(summary, context):
     status = summary.get("status", "infrastructure-failed")
     label = summary.get("suite", context.get("E2E_SUITE_LABEL", "e2e"))
     number = context.get("GITHUB_RUN_NUMBER", "?")
-    header = f"E2E {label} #{number}: {status}"
-    detail = ", ".join(f"{counts.get(key, 0)} {key}" for key in ("passed", "failed", "flaky", "skipped", "notRun"))
+    icon = "✅" if status == "passed" else "⚠️" if status in ("running", "infrastructure-failed") else "❌"
+    heading = f"{icon} Ordering {label} · #{number} · {status.replace('-', ' ').title()}"
+    detail = " · ".join(f"{counts.get(key, 0)} {name}" for key, name in (("passed", "passed"), ("failed", "failed"), ("skipped", "skipped"), ("flaky", "flaky"), ("notRun", "not run"))) if counts else "No complete test report available"
     repository = context.get("GITHUB_REPOSITORY", "")
     run_id = context.get("GITHUB_RUN_ID", "")
-    url = f"https://github.com/{repository}/actions/runs/{run_id}" if repository and run_id else ""
+    url = f"https://github.com/{repository}/actions/runs/{run_id}" if re.fullmatch(r"[\w.-]+/[\w.-]+", repository) and str(run_id).isdigit() else ""
     issues = summary.get("issues", []) + ([summary["error"]] if summary.get("error") else [])
-    lines = [header, detail, "Target: " + summary.get("origin", context.get("BASE_URL", "unavailable"))]
-    lines.extend(str(issue)[:300] for issue in issues[:8])
+    if summary.get("leaseReleaseError"):
+        issues.append("Account lock release failed: " + summary["leaseReleaseError"])
+    if summary.get('leaseRetainedReason'):
+        issues.append('Account lock retained: ' + summary['leaseRetainedReason'])
+    blocks = [{"type": "header", "text": {"type": "plain_text", "text": clean(heading, 140), "emoji": True}},
+              {"type": "section", "text": {"type": "mrkdwn", "text": "*Results*\n" + detail}}]
+    projects = summary.get("projects", [])
+    if projects:
+        rows = []
+        for project in projects[:8]:
+            c = project.get("counts", {})
+            marker = "✅" if project.get("status") == "passed" else "❌"
+            rows.append(f"{marker} *{clean(project.get('project', '?'), 40)}*: {c.get('passed', 0)} passed · {c.get('failed', 0)} failed · {c.get('skipped', 0)} skipped · {c.get('notRun', 0)} not run")
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(rows)}})
+        checks = [value for project in projects for value in project.get("critical", {}).values()]
+        warnings = sum(project.get("warnings", 0) for project in projects)
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Signup / COD / cleanup: {'✅ all required checks passed' if checks and all(value == 'passed' for value in checks) else '❌ incomplete or failed'} · {warnings} tests with diagnostic warnings"}]})
+    failures = summary.get("failedTests", [])
+    if failures:
+        lines = [f"• *{clean(item.get('project'), 30)}* — {clean(item.get('title'), 180)}\n  {clean(item.get('error'), 220)}" for item in failures[:4]]
+        if len(failures) > 4:
+            lines.append(f"…and {len(failures) - 4} more; open evidence below")
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Failures*\n" + "\n".join(lines)}})
+    if issues:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Run issues*\n" + "\n".join("• " + clean(issue, 220) for issue in issues[:5])}})
+    timing = []
+    try:
+        start = datetime.fromisoformat(summary["startedAt"].replace("Z", "+00:00"))
+        finish = datetime.fromisoformat(summary["finishedAt"].replace("Z", "+00:00"))
+        seconds = max(0, int((finish - start).total_seconds()))
+        timing = [f"Duration {seconds // 60}m {seconds % 60}s", finish.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y · %I:%M %p IST")]
+    except (KeyError, ValueError, TypeError):
+        pass
+    branch = context.get("GITHUB_REF_NAME", "")
+    sha = context.get("GITHUB_SHA", "")[:7]
+    if branch:
+        timing.append(clean(branch, 80) + (f" · {clean(sha, 7)}" if sha else ""))
+    if timing:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " | ".join(timing)}]})
+    buttons = []
     if url:
-        lines.append("Run and evidence: " + url)
-    return {"text": header, "attachments": [{"color": "good" if status == "passed" else "danger", "text": "\n".join(lines)}]}
+        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Run & evidence"}, "url": url})
+    origin = http_url(summary.get("origin", context.get("BASE_URL", "")))
+    if origin:
+        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Open test store"}, "url": origin})
+    if buttons:
+        blocks.append({"type": "actions", "elements": buttons})
+    # Fallback is for screen readers and notification previews; only blocks render in-channel.
+    return {"text": clean(heading) + " — " + detail, "blocks": blocks, "unfurl_links": False, "unfurl_media": False}
 
 
 def deliver(payload, webhook, opener=None, wait=None):
@@ -51,12 +117,19 @@ def deliver(payload, webhook, opener=None, wait=None):
 
 
 def main():
+    if os.environ.get('E2E_NOTIFICATIONS_DISABLED') == 'true':
+        print('Notifications disabled for this execution')
+        return 0
     destination = sys.argv[1] if len(sys.argv) > 1 else "test-results/summary.json"
     try:
         with open(destination, encoding="utf-8") as source:
             summary = json.load(source)
+            if not isinstance(summary, dict):
+                raise ValueError('Report must be an object')
     except (OSError, ValueError):
         summary = {"status": "infrastructure-failed", "error": "No valid run report; inspect configuration, install, runner, or cancellation steps"}
+    if os.environ.get("GITHUB_RUN_ID") and str(summary.get('githubRunId', '')) != os.environ['GITHUB_RUN_ID'] and not str(summary.get("runId", "")).startswith(os.environ["GITHUB_RUN_ID"] + "-"):
+        summary = {"status": "infrastructure-failed", "error": "Report is missing or belongs to another run; open workflow evidence"}
     if os.environ.get("E2E_JOB_STATUS") in ("failure", "cancelled") and summary.get("status") == "passed":
         summary = dict(summary, status="infrastructure-failed", error="Workflow infrastructure failed after tests")
     payload = build_payload(summary, os.environ)

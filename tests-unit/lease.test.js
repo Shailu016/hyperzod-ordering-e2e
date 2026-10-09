@@ -1,31 +1,25 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { acquireLease } = require('../utils/lease');
-test('identity lease uses atomic ref creation and checks owner before release', async () => {
-  const calls = [];
-  const request = async (url, options) => {
-    calls.push([url, options.method]);
-    let data = url.endsWith('ref/heads/main') ? { object: { sha: 'base' } } : url.endsWith('commits/base') ? { tree: { sha: 'tree' } } : options.method === 'POST' && url.endsWith('/commits') ? { sha: 'owned' } : { object: { sha: 'owned' } };
-    return { ok: true, status: options.method === 'DELETE' ? 204 : 200, json: async () => data };
-  };
-  const release = await acquireLease({ origin: 'https://test.example', email: 'user@example.invalid', owner: 'run', token: 'fake', request });
+const { fixture } = require('./lease-fixture');
+const input = { origin: 'https://test.example', email: 'user@example.invalid', owner: 'run' };
+test('identity lease creation is exclusive and release is atomic and idempotent', async () => {
+  const { calls, refs, options } = fixture();
+  const release = await acquireLease({ ...input, ...options });
+  assert.equal(refs.size, 1);
   await release(); await release();
-  assert.equal(calls.filter((c) => c[1] === 'DELETE').length, 1);
+  assert.equal(refs.size, 0);
+  assert.equal(calls.filter((c) => c.url.endsWith('/graphql')).length, 1);
+  assert.equal(calls.some((c) => c.method === 'DELETE'), false);
 });
-test('lease contention fails before a caller can start tests', async () => {
-  const request = async (url, options) => ({ ok: !url.endsWith('/refs'), status: 422, json: async () => url.endsWith('ref/heads/main') ? { object: { sha: 'base' } } : url.endsWith('commits/base') ? { tree: { sha: 'tree' } } : { sha: 'owned' } });
-  await assert.rejects(acquireLease({ origin: 'https://test.example', email: 'user@example.invalid', owner: 'run', token: 'fake', request }), /another runner/);
+test('lease contention fails before tests; age never authorizes stealing', async () => {
+  const { calls, options } = fixture({ contend: true });
+  await assert.rejects(acquireLease({ ...input, ...options }), /another runner/);
+  assert.equal(calls.some((c) => c.method === 'DELETE' || c.url.endsWith('/graphql')), false);
 });
-test('release refuses to delete a lease acquired by another owner', async () => {
-  let releasePhase = false;
-  let deleted = false;
-  const request = async (url, options) => {
-    if (options.method === 'DELETE') deleted = true;
-    const data = url.endsWith('ref/heads/main') ? { object: { sha: 'base' } } : url.endsWith('commits/base') ? { tree: { sha: 'tree' } } : url.endsWith('/commits') ? { sha: 'owned' } : { object: { sha: releasePhase ? 'someone-else' : 'owned' } };
-    return { ok: true, status: 200, json: async () => data };
-  };
-  const release = await acquireLease({ origin: 'https://test.example', email: 'user@example.invalid', owner: 'run', token: 'fake', request });
-  releasePhase = true;
-  await assert.rejects(release(), /owner changed/);
-  assert.equal(deleted, false);
+test('owner changing immediately before release remains locked', async () => {
+  const { refs, options } = fixture({ changed: true });
+  const release = await acquireLease({ ...input, ...options });
+  await assert.rejects(release(), /rejected/);
+  assert.equal([...refs.values()][0], 'c'.repeat(40));
 });

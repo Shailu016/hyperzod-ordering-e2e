@@ -18,7 +18,8 @@
 		"check:env": "node scripts/check-env.js",
 		"report": "node scripts/report.js",
 		"test:unit": "node scripts/unit-tests.js",
-		"check:types": "tsc --noEmit"
+		"check:types": "tsc --noEmit",
+		"lease:inspect": "node scripts/recover-lease.js"
 	},
 	"devDependencies": {
 		"@axe-core/playwright": "4.13.0",
@@ -26,6 +27,6 @@
 		"@types/node": "22.20.5",
 		"dotenv": "^16.4.5",
 		"typescript": "7.0.2",
-		"yaml": "2.8.1"
+		"yaml": "2.9.1"
 	}
 }

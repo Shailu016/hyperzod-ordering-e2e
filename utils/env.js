@@ -8,8 +8,8 @@ const STORAGE_STATE = path.join(AUTH_DIR, "user.json");
 const USER_META = path.join(AUTH_DIR, "user-meta.json");
 
 // Per-project states for the multi-device matrix (web / android / ios).
-// The setup project writes user.json once, then fans it out to all three so
-// every device project starts from the same authenticated session.
+// Each managed device invocation has its own run directory and fresh setup.
+// Setup fans out states inside that directory so cleanup can use desktop Chrome.
 const PROJECTS = ["web", "android", "ios"];
 function storageStateFor(project) {
 	if (!project || project === "setup" || project === "cleanup" || project === "web") {
@@ -90,7 +90,7 @@ function validateEnv() {
 
 /**
  * Copy the canonical setup session to every device project state.
- * Keeps web/android/ios in sync without running signup three times.
+ * Keeps the current invocation's device and desktop cleanup state in sync.
  */
 function fanOutStorageStates() {
 	ensureAuthDir();

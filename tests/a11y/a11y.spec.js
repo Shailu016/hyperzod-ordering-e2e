@@ -4,6 +4,7 @@ const { ensureLocation, ensureLoggedIn, gotoAuthed } = require('../../utils/app'
 test('critical routes meet WCAG A/AA automated checks and account controls receive keyboard focus @a11y', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   await ensureLocation(page); await ensureLoggedIn(page);
+  const violations = [];
   for (const [route, root] of [['/en/home', '#MultiVendorHome'], ['/en/profile', '#profile'], ['/en/checkout', '#checkout']]) {
     await gotoAuthed(page, route);
     await expect(page.locator(`${root}:visible`).first()).toBeVisible();
@@ -11,8 +12,10 @@ test('critical routes meet WCAG A/AA automated checks and account controls recei
     expect(await page.locator('html').getAttribute('lang')).toMatch(/^[a-z]{2}/i);
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
     await testInfo.attach(`axe-${root.slice(1)}`, { body: Buffer.from(JSON.stringify(results.violations)), contentType: 'application/json' });
-    expect(results.violations, `${route}: accessibility violations`).toEqual([]);
+    violations.push(...results.violations.map((v) => ({ route, id: v.id, impact: v.impact, nodes: v.nodes.length })));
   }
+  const summary = violations.map((v) => `${v.route}: ${v.id} (${v.impact}, ${v.nodes} nodes)`).join('; ');
+  expect.soft(violations, `accessibility violations: ${summary}`).toEqual([]);
   await gotoAuthed(page, '/en/home');
   const control = page.locator('#ProfileBtn:visible').first().or(page.getByRole('button', { name: /account/i }).first()).first();
   await expect(control).toBeVisible();

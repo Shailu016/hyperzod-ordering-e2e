@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-require('dotenv').config();
+require('dotenv').config({ path: process.env.E2E_ENV_FILE || undefined });
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -8,19 +8,17 @@ const { acquireLease } = require('../utils/lease');
 const { exportManifest } = require('../utils/manifest');
 const { assertAllowedTarget } = require('../utils/policy');
 const { summarizeReports } = require('./summarize');
+const { requiresReconciliation } = require('../utils/lifecycle');
 const ROOT = path.resolve(__dirname, '..');
 const SUITES = { signup: ['setup'], smoke: ['web'], web: ['web'], android: ['android'], ios: ['ios'], mobile: ['android', 'ios'], all: ['web', 'android', 'ios'] };
 async function run(suite = process.argv[2]) {
   if (!SUITES[suite]) throw new Error('Choose smoke, web, android, ios, mobile, or all');
-  const origin = assertAllowedTarget(process.env.BASE_URL, process.env.E2E_ALLOWED_ORIGINS);
-  const missing = require('../utils/env').validateEnv();
-  if (missing.length) throw new Error(`Invalid E2E settings: ${missing.join(', ')}`);
   const runId = `${process.env.GITHUB_RUN_ID || Date.now()}-${crypto.randomUUID()}`;
   const directory = path.join(ROOT, 'test-results', runId);
   fs.mkdirSync(directory, { recursive: true });
   const summaryFile = path.join(ROOT, 'test-results', 'summary.json');
   const outcomes = [];
-  const initial = { runId, suite, origin, expectedProjects: SUITES[suite], startedAt: new Date().toISOString(), outcomes, status: 'running' };
+  const initial = { runId, githubRunId: process.env.GITHUB_RUN_ID, suite, origin: '', expectedProjects: SUITES[suite], startedAt: new Date().toISOString(), outcomes, status: 'running' };
   const writeSummary = (value) => {
     const json = JSON.stringify(value, null, 2);
     fs.writeFileSync(path.join(directory, 'summary.json'), json);
@@ -30,10 +28,23 @@ async function run(suite = process.argv[2]) {
   let release;
   let child;
   let stopped = false;
+  let reconciliationRequired = false;
   const stop = () => { stopped = true; child?.kill('SIGTERM'); };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
   try {
+    const origin = assertAllowedTarget(process.env.BASE_URL, process.env.E2E_ALLOWED_ORIGINS);
+    initial.origin = origin;
+    if (process.env.E2E_ISOLATED_IDENTITY === 'true') {
+      if (process.env.GITHUB_ACTIONS === 'true') throw new Error('Isolated identity is a local validation option');
+      const identity = require('../utils/isolated-identity').isolatedIdentity(process.env.TEST_USER_EMAIL);
+      process.env.TEST_USER_EMAIL = identity.email;
+      process.env.TEST_USER_PHONE = identity.phone;
+      console.log('Local validation uses an isolated test identity. Notifications are not part of this runner.');
+    }
+    const missing = require('../utils/env').validateEnv();
+    if (missing.length) throw new Error(`Invalid E2E settings: ${missing.join(', ')}`);
+    writeSummary(initial);
     release = await acquireLease({ origin, email: process.env.TEST_USER_EMAIL, owner: runId });
     for (const project of SUITES[suite]) {
       if (stopped) break;
@@ -50,10 +61,13 @@ async function run(suite = process.argv[2]) {
         child.on('error', (error) => resolve({ exitCode: 1, error: error.message }));
         child.on('exit', (exitCode, signal) => resolve({ exitCode: exitCode ?? 1, signal }));
       });
-      try { exportManifest(`${runId}-${project}`, projectDir); }
+      let resource;
+      try { resource = exportManifest(`${runId}-${project}`, projectDir); }
       catch (error) { result.exitCode = 1; result.error = `Lifecycle evidence export failed: ${error.message}`; }
+      reconciliationRequired = requiresReconciliation(resource);
       outcomes.push({ project, ...result, report: path.join(projectDir, 'report.json') });
       writeSummary({ ...initial, outcomes });
+      if (reconciliationRequired) break;
     }
     const summary = summarizeReports(initial, outcomes, fs.readFileSync);
     writeSummary({ ...summary, finishedAt: new Date().toISOString() });
@@ -62,7 +76,13 @@ async function run(suite = process.argv[2]) {
     writeSummary({ ...initial, outcomes, status: 'infrastructure-failed', error: error.message, finishedAt: new Date().toISOString() });
     throw error;
   } finally {
-    try { if (release) await release(); }
+    try {
+      if (release && reconciliationRequired) {
+        const current = JSON.parse(fs.readFileSync(path.join(directory, 'summary.json'), 'utf8'));
+        writeSummary({ ...current, status: 'infrastructure-failed', leaseRetainedReason: 'Cleanup proof is missing or an order attempt is ambiguous; reconcile resource-lifecycle.json before recovering the identity lease' });
+        process.exitCode = 1;
+      } else if (release) await release();
+    }
     catch (error) { writeSummary({ ...JSON.parse(fs.readFileSync(path.join(directory, 'summary.json'), 'utf8')), status: 'infrastructure-failed', leaseReleaseError: error.message }); process.exitCode = 1; }
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);

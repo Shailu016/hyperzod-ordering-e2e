@@ -84,7 +84,7 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 	if (!intent.success) {
 		throw new Error(`login/intent failed: ${JSON.stringify(intent).slice(0, 300)}`);
 	}
-	let mode = "signup";
+	const mode = "signup";
 	if (require("../utils/policy").intentState(intent) === "present") {
 		throw new Error("Test identity was concurrently recreated; refusing to share another run's account");
 	} else {
@@ -99,7 +99,9 @@ setup("signup: purge leftovers, create user via UI and persist session @smoke", 
 
 	require("../utils/manifest").updateManifest({ userId: user.id, lifecycle: "authenticated" });
 	ensureAuthDir();
-	await context.storageState({ path: STORAGE_STATE });
+	const origin = new URL(config.baseURL).origin;
+	const storage = require('../utils/auth-state').authenticatedState(await context.storageState(), await require('../utils/store').readUserState(page), origin);
+	require('node:fs').writeFileSync(STORAGE_STATE, JSON.stringify(storage));
 	fanOutStorageStates();
 	saveUserMeta({
 		id: user.id,

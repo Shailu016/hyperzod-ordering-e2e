@@ -47,5 +47,6 @@ function exportManifest(id, destination) {
   const evidence = Object.fromEntries(fields.filter((key) => Object.hasOwn(saved, key)).map((key) => [key, saved[key]]));
   fs.mkdirSync(destination, { recursive: true });
   fs.writeFileSync(path.join(destination, 'resource-lifecycle.json'), redact(JSON.stringify(evidence, null, 2)));
+  return evidence;
 }
-module.exports = { runDir, scope, readManifest, updateManifest, recordOrder, assertManagedRun, exportManifest };
+module.exports = { runDir, directoryFor, scope, readManifest, updateManifest, recordOrder, assertManagedRun, exportManifest };

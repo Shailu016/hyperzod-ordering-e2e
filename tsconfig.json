@@ -18,8 +18,16 @@
   },
   "include": [
     "utils/policy.js",
+    "utils/api-budget.js",
+    "utils/isolated-identity.js",
+    "utils/lifecycle.js",
     "utils/lease.js",
     "utils/manifest.js",
+    "utils/lease-recovery.js",
+    "utils/diagnostics.js",
+    "utils/observe.js",
+    "utils/session-recovery.js",
+    "utils/auth-state.js",
     "scripts/summarize.js",
     "scripts/check-schedule.js"
   ]

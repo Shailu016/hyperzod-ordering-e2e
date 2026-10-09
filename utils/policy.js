@@ -84,4 +84,5 @@ function redact(value) {
     .replace(/("(?:access_token|refresh_token|password|code|email|mobile|phone)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[EMAIL]');
 }
-module.exports = { targetOrigin, assertAllowedTarget, identityKey, assertIdentity, intentState, isCashMode, orderIdFrom, cartLines, validateBill, classifyCheckout, redact };
+function normalizeText(value) { return String(value).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase(); }
+module.exports = { targetOrigin, assertAllowedTarget, identityKey, assertIdentity, intentState, isCashMode, orderIdFrom, cartLines, validateBill, classifyCheckout, redact, normalizeText };

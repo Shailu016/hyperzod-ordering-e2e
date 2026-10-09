@@ -1,6 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const p = require('../utils/policy');
+test('merchant matching normalizes casing and whitespace without accepting a substring', () => {
+  assert.equal(p.normalizeText('  My   SHOP '), p.normalizeText('my shop'));
+  assert.notEqual(p.normalizeText('my shop'), p.normalizeText('my shop express'));
+});
 test('destructive scope rejects wrong tenant, credentials and URL paths', () => {
   assert.equal(p.assertAllowedTarget('https://automations-store.hyperzod.me/'), 'https://automations-store.hyperzod.me');
   for (const value of ['https://customer.hyperzod.me', 'https://user:pass@automations-store.hyperzod.me', 'https://automations-store.hyperzod.me/other', 'file:///tmp', '-']) assert.throws(() => p.assertAllowedTarget(value));

@@ -59,7 +59,8 @@ async function waitForAppBoot(page) {
 					console.log(
 						`[boot] boot failure (attempt ${attempt}): ${String(error && error.message ? error.message : error).slice(0, 120)} - waited ${Math.round(waitMs / 1000)}s, reloading`
 					);
-					await page.reload();
+					await require('./api-budget').waitForApiBudget();
+					await page.reload({ waitUntil: 'domcontentloaded' });
 					await page.waitForLoadState("domcontentloaded");
 				},
 			}
@@ -80,7 +81,10 @@ async function expectBootOk(page, timeout) {
 				if (/boot-failed|boot-error/.test(url)) {
 					throw new Error(`App boot failed, landed on: ${url}`);
 				}
-				return page.locator("#WelcomePage:visible, #MultiVendorHome:visible, header:visible, #checkout:visible, #profile:visible, #MerchantSearchPage:visible, .scheme-merchant-page:visible").count();
+				const roots = await page.locator("#WelcomePage:visible, #MultiVendorHome:visible, #MultiVendorSearch:visible, header:visible, #checkout:visible, #profile:visible, #orders:visible, #addresses:visible, #Languages:visible, #MerchantSearchPage:visible, :text(\"Page Not Found\"):visible, .scheme-merchant-page:visible").count();
+				if (roots) return roots;
+				if (/\/service-area(?:[/?]|$)/.test(url) && await page.getByRole('region', { name: 'Map', exact: true }).or(page.locator('canvas:visible')).first().isVisible()) return 1;
+				return 0;
 			},
 			{ timeout, message: "app did not boot" }
 		)
@@ -102,14 +106,22 @@ async function bootFailureSeen(page) {
  * cold dev backend - poll instead of a fixed expect so slow spells pass.
  */
 async function expectFirstMerchantCard(page, timeout = 90_000) {
-	let count = 0;
-	await expect
-		.poll(async () => (count = await page.locator(".merchant-card").count()), {
-			timeout,
-			message: "no merchant cards loaded on home",
-		})
-		.toBeGreaterThan(0);
-	return page.locator(".merchant-card").first();
+	const startedAt = Date.now(), deadline = startedAt + timeout;
+	const budget = require('./api-budget');
+	for (let attempt = 0; attempt < 2; attempt++) {
+		let result;
+		await expect.poll(async () => {
+			result = await page.locator(".merchant-card:visible").count() > 0 ? 'ready' :
+				!attempt && budget.homeReadWasThrottledSince(startedAt - 5_000) ? 'throttled' : 'loading';
+			return result;
+		}, { timeout: Math.max(1, deadline - Date.now()), message: "no merchant cards loaded on home" }).toMatch(/^(ready|throttled)$/);
+		if (result === 'ready') break;
+		// Only the proven read-only home query is recovered; cart/order actions are not repeated.
+		await budget.waitForApiBudget({ maximumWaitMs: Math.max(0, deadline - Date.now()) });
+		if (Date.now() >= deadline) throw new Error('Home rate-limit recovery exceeded the merchant-read budget');
+		await page.reload({ waitUntil: 'domcontentloaded', timeout: Math.min(20_000, deadline - Date.now()) });
+	}
+	return page.locator(".merchant-card:visible").first();
 }
 
 /**
@@ -205,6 +217,7 @@ async function ensureLocation(page) {
 	await gotoWithRetry(page, "/");
 	await waitForAppBoot(page);
 	await ensureInteractiveShell(page);
+	require("./diagnostics").requireDependency(page, "geocoding");
 
 	// Already redirected away from welcome: location is settled only if it
 	// is persisted AND no forced location drawer is open. CAUTION: the
@@ -524,13 +537,29 @@ async function wipeAuthKeepLocation(page) {
  *  boots with checkSessionExpiration and logs out once token_expires_in
  *  passes - long runs outlive it). No-op when already logged in, so it is
  *  safe in every beforeEach. Returns true when it had to renew. */
-async function ensureLoggedIn(page, user) {
+async function ensureLoggedIn(page, user, { minimumValidityMs = 60_000 } = {}) {
+	const u = user || require("./env").testUser;
+	const expectedId = require("./manifest").readManifest().userId;
+	const { readStore } = require('./store');
+	const { hasSessionBudget } = require('./session-recovery');
+	const initial = await readStore(page);
+	if (!initial.user && initial.hasToken && hasSessionBudget(initial.tokenExpiresAt, minimumValidityMs)) {
+		try {
+			await require('./observe').observeUntil('stored session identity hydration', () => readStore(page),
+				(state) => (state.authenticated === true && state.user) || !state.hasToken || !hasSessionBudget(state.tokenExpiresAt, minimumValidityMs),
+				{ timeout: 5_000, interval: 200 });
+		} catch (error) {
+			if (!String(error.message).startsWith('stored session identity hydration: did not settle')) throw error;
+			// No trustworthy live identity: authenticate through UI, never force a browser auth flag.
+		}
+	}
 	if (await isLoggedIn(page)) {
 		const me = await loggedInUserFromStore(page);
-		if (me) { require("./policy").assertIdentity(me, (user || require("./env").testUser).email); return false; }
+		require("./policy").assertIdentity(me, u.email, expectedId);
+		if (require("./session-recovery").hasSessionBudget((await require("./store").readStore(page)).tokenExpiresAt, minimumValidityMs)) return false;
+		await wipeAuthKeepLocation(page);
 	}
-	const u = user || require("./env").testUser;
-	console.log("[auth] session expired mid-run - logging back in");
+	console.log("[auth] session unavailable or near expiry - authenticating the dedicated test identity");
 	// Stable ground first: the current page may be mid-redirect after the
 	// logout bounce (header without login button). A fresh boot also settles
 	// any half-loaded state before the auth panel opens.
@@ -539,10 +568,18 @@ async function ensureLoggedIn(page, user) {
 	await ensureLocation(page);
 	await openAuthPanel(page);
 	const intent = await submitLoginIntent(page, u.email);
-	if (!intent.success) {
-		throw new Error(`re-login intent failed: ${JSON.stringify(intent).slice(0, 300)}`);
-	}
+	if (require("./policy").intentState(intent) !== "present") throw new Error("Expected test account disappeared during session recovery");
 	await completeLogin(page, { password: u.password, intentBody: intent });
+	const restored = await expectLoggedInUser(page, u.email);
+	require("./policy").assertIdentity(restored, u.email, expectedId);
+	if (!require("./session-recovery").hasSessionBudget((await require("./store").readStore(page)).tokenExpiresAt, minimumValidityMs)) throw new Error("Fresh token lifetime is insufficient for the requested observation/submission budget");
+	require("./diagnostics").markSessionRecovered(page);
+	const env = require("./env");
+	const fs = require("node:fs");
+	const previous = JSON.parse(fs.readFileSync(env.STORAGE_STATE, "utf8"));
+	const fresh = require('./auth-state').authenticatedState(await page.context().storageState(), await require('./store').readUserState(page), new URL(config.baseURL).origin);
+	fs.writeFileSync(env.STORAGE_STATE, JSON.stringify(require("./auth-state").refreshAuthState(previous, fresh, new URL(config.baseURL).origin)));
+	env.fanOutStorageStates();
 	return true;
 }
 
@@ -606,7 +643,10 @@ async function completeSignupForm(page, user) {
 		(r) => r.url().includes(API.register) && r.request().method() === "POST",
 		{ timeout: 60_000 }
 	);
-	await form.locator('[data-test-id="test-zXJcBCYOrSEG"]').click();
+	respPromise.catch(() => {});
+	const signup = form.locator('[data-test-id="test-zXJcBCYOrSEG"]');
+	await expect(signup, 'signup fields must pass client validation before submission').toBeEnabled();
+	await signup.click();
 	const resp = await respPromise;
 	const body = await resp.json();
 

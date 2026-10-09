@@ -1,6 +1,6 @@
 const { test, expect } = require('../fixtures/test.fixture');
 const { ensureLocation, ensureLoggedIn, gotoAuthed, gotoWithRetry, waitForAppBoot, API } = require('../utils/app');
-const { addFirstProductToCart, ensureDeliveryAddress, chooseCashPayment, handleScheduleDialogIfShown, placeOrderButton, gotoCheckout } = require('../flows/order.flow');
+const { addFirstProductToCart, prepareCheckout, openOrderableMerchant, handleScheduleDialogIfShown, placeOrderButton } = require('../flows/order.flow');
 const { readStore } = require('../utils/store');
 const { orderIdFrom, assertIdentity, cartLines, validateBill } = require('../utils/policy');
 const { assertManagedRun, readManifest, updateManifest, recordOrder } = require('../utils/manifest');
@@ -11,15 +11,10 @@ test('places a COD order end-to-end and sees it in order history @smoke @checkou
   if (readManifest().submissionAttempted || readManifest().orders.length) throw new Error('Order attempt cannot be replayed; reconcile the recorded attempt');
   await ensureLocation(page);
   await ensureLoggedIn(page);
-  await gotoWithRetry(page, '/en/home');
-  await waitForAppBoot(page);
-  await page.locator('.merchant-card:visible').first().click();
-  await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await openOrderableMerchant(page);
   const added = await addFirstProductToCart(page);
-  await gotoCheckout(page, added.cart_id);
-  await ensureDeliveryAddress(page);
-  const payment = await chooseCashPayment(page);
-  const state = await readStore(page);
+  const expectedLines = cartLines((await readStore(page)).items);
+  const { state, payment } = await prepareCheckout(page, { cartId: added.cart_id, expectedLines, forOrder: true });
   assertIdentity(state.user, testUser.email, readManifest().userId);
   const lines = cartLines(state.items);
   const bill = validateBill(state.cart);
