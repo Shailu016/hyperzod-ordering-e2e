@@ -2,6 +2,8 @@
 require("dotenv").config();
 const { defineConfig, devices } = require("@playwright/test");
 const fs = require("fs");
+const path = require("path");
+const RUN_DIR = process.env.E2E_RUN_DIR || "./test-results/standalone";
 // Single source of truth for per-project storage states (see utils/env.js).
 // playwright.config.js must not duplicate AUTH_DIR layout.
 const { AUTH_DIR, PROJECTS, storageStateFor: stateFor, ensureAuthDir, validateBaseURL } = require("./utils/env");
@@ -22,7 +24,7 @@ if (!BASE_URL) {
 validateBaseURL(BASE_URL);
 const ORDERING_UI_DIR =
 	process.env.ORDERING_UI_DIR || "C:\\Hyperzod_repo\\hyperzod-ui-ordering";
-const IS_LOCAL_TARGET = /localhost|127\.0\.0\.1/.test(BASE_URL);
+const IS_LOCAL_TARGET = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(BASE_URL).hostname);
 const AUTO_START_SERVER =
 	IS_LOCAL_TARGET && (process.env.AUTO_START_SERVER || "true").toLowerCase() !== "false";
 console.log(`[e2e] target: ${BASE_URL} (${IS_LOCAL_TARGET ? "local dev server" : "remote store"})`);
@@ -37,24 +39,27 @@ for (const name of ["user.json", ...PROJECTS.map((p) => `user-${p}.json`)]) {
 }
 module.exports = defineConfig({
 	testDir: "./tests",
-	outputDir: "./test-results",
+	outputDir: path.join(RUN_DIR, "artifacts"),
+	forbidOnly: !!process.env.CI,
+	failOnFlakyTests: !!process.env.CI,
 	fullyParallel: false,
 	// Serial within a project: specs share one user account + one cart.
 	workers: 1,
-	retries: process.env.CI ? 1 : 0,
+	retries: 0, // Real account/cart/order mutations must never be blindly replayed.
 	timeout: 180 * 1000,
 	expect: { timeout: 20 * 1000 },
 	reporter: [
 		["list"],
-		["html", { open: "never" }],
-		["junit", { outputFile: "./test-results/junit.xml" }],
+		["html", { open: "never", outputFolder: path.join(RUN_DIR, "html") }],
+		["json", { outputFile: path.join(RUN_DIR, "report.json") }],
+		["junit", { outputFile: path.join(RUN_DIR, "junit.xml") }],
 	],
 
 	use: {
 		baseURL: BASE_URL,
 		actionTimeout: 20 * 1000,
 		navigationTimeout: 60 * 1000,
-		trace: "retain-on-failure",
+		trace: process.env.E2E_RETAIN_SENSITIVE_TRACES === "true" ? "retain-on-failure" : "off",
 		screenshot: "only-on-failure",
 		video: "retain-on-failure",
 		locale: "en-US",
@@ -111,7 +116,8 @@ module.exports = defineConfig({
 			use: {
 				...devices["Desktop Chrome"],
 				viewport: { width: 1440, height: 900 },
-				storageState: stateFor("web"),
+				// Cleanup verifies ownership through a fresh UI login, without revoking an in-flight stored session.
+				storageState: { cookies: [], origins: [] },
 			},
 		},
 	],

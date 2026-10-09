@@ -44,29 +44,30 @@ async function waitForAppBoot(page) {
 	try {
 		await retryAsync(
 			async () => {
-				await expectBootOk(page, 90_000);
+				await expectBootOk(page, 20_000);
 				if (await bootFailureSeen(page)) {
 					throw new Error("Boot Failed content rendered inline");
 				}
 			},
 			{
-				attempts: 4,
-				baseMs: 20_000,
-				capMs: 75_000,
+				attempts: 3,
+				baseMs: 2_000,
+				capMs: 5_000,
 				label: "app boot",
 				onRetry: async ({ attempt, waitMs, error }) => {
 					recoveries = attempt;
 					console.log(
 						`[boot] boot failure (attempt ${attempt}): ${String(error && error.message ? error.message : error).slice(0, 120)} - waited ${Math.round(waitMs / 1000)}s, reloading`
 					);
-					await page.reload();
+					await require('./api-budget').waitForApiBudget();
+					await page.reload({ waitUntil: 'domcontentloaded' });
 					await page.waitForLoadState("domcontentloaded");
 				},
 			}
 		);
 	} catch (err) {
 		throw new Error(
-			`App boot failed persistently after 4 tries (check console-log for 429 rate limiting): ${String(err && err.message ? err.message : err).slice(0, 200)}`
+			`App boot failed after bounded recovery (inspect HTTP status and transport evidence): ${String(err && err.message ? err.message : err).slice(0, 200)}`
 		);
 	}
 	if (recoveries > 0) console.log(`[boot] recovered after ${recoveries} backoff reload(s)`);
@@ -80,7 +81,10 @@ async function expectBootOk(page, timeout) {
 				if (/boot-failed|boot-error/.test(url)) {
 					throw new Error(`App boot failed, landed on: ${url}`);
 				}
-				return page.locator("#app-router-view, #WelcomePage, #MultiVendorHome").count();
+				const roots = await page.locator("#WelcomePage:visible, #MultiVendorHome:visible, #MultiVendorSearch:visible, header:visible, #checkout:visible, #profile:visible, #orders:visible, #addresses:visible, #Languages:visible, #MerchantSearchPage:visible, :text(\"Page Not Found\"):visible, .scheme-merchant-page:visible").count();
+				if (roots) return roots;
+				if (/\/service-area(?:[/?]|$)/.test(url) && await page.getByRole('region', { name: 'Map', exact: true }).or(page.locator('canvas:visible')).first().isVisible()) return 1;
+				return 0;
 			},
 			{ timeout, message: "app did not boot" }
 		)
@@ -102,14 +106,22 @@ async function bootFailureSeen(page) {
  * cold dev backend - poll instead of a fixed expect so slow spells pass.
  */
 async function expectFirstMerchantCard(page, timeout = 90_000) {
-	let count = 0;
-	await expect
-		.poll(async () => (count = await page.locator(".merchant-card").count()), {
-			timeout,
-			message: "no merchant cards loaded on home",
-		})
-		.toBeGreaterThan(0);
-	return page.locator(".merchant-card").first();
+	const startedAt = Date.now(), deadline = startedAt + timeout;
+	const budget = require('./api-budget');
+	for (let attempt = 0; attempt < 2; attempt++) {
+		let result;
+		await expect.poll(async () => {
+			result = await page.locator(".merchant-card:visible").count() > 0 ? 'ready' :
+				!attempt && budget.homeReadWasThrottledSince(startedAt - 5_000) ? 'throttled' : 'loading';
+			return result;
+		}, { timeout: Math.max(1, deadline - Date.now()), message: "no merchant cards loaded on home" }).toMatch(/^(ready|throttled)$/);
+		if (result === 'ready') break;
+		// Only the proven read-only home query is recovered; cart/order actions are not repeated.
+		await budget.waitForApiBudget({ maximumWaitMs: Math.max(0, deadline - Date.now()) });
+		if (Date.now() >= deadline) throw new Error('Home rate-limit recovery exceeded the merchant-read budget');
+		await page.reload({ waitUntil: 'domcontentloaded', timeout: Math.min(20_000, deadline - Date.now()) });
+	}
+	return page.locator(".merchant-card:visible").first();
 }
 
 /**
@@ -117,15 +129,16 @@ async function expectFirstMerchantCard(page, timeout = 90_000) {
  * delivery entirely (tar-pit under load) - a single 60s timeout must not
  * fail a test that passes on immediate retry.
  */
-async function gotoWithRetry(page, url, { timeout = 60_000 } = {}) {
+async function gotoWithRetry(page, url, { timeout = 20_000 } = {}) {
 	await retryAsync(
 		async () => {
 			await page.goto(url, { waitUntil: "domcontentloaded", timeout });
 		},
 		{
-			attempts: 3,
-			baseMs: 10_000,
-			capMs: 30_000,
+			attempts: 2,
+			baseMs: 1_000,
+			capMs: 3_000,
+			shouldRetry: (err) => /Timeout|ERR_CONNECTION|ERR_TIMED_OUT|ERR_NETWORK/i.test(String(err.message)),
 			label: `goto ${url}`,
 			onRetry: ({ attempt, waitMs, error }) =>
 				console.log(
@@ -145,7 +158,7 @@ async function gotoWithRetry(page, url, { timeout = 60_000 } = {}) {
 async function ensureInteractiveShell(page) {
 	const probe = () =>
 		page
-			.locator("#WelcomePage, #MultiVendorHome, header, [role='banner'], #LoginBtn, #ProfileBtn")
+			.locator("#WelcomePage:visible, #MultiVendorHome:visible, header:visible, [role='banner']:visible, #LoginBtn:visible, #ProfileBtn:visible")
 			.first()
 			.isVisible()
 			.catch(() => false);
@@ -161,12 +174,13 @@ async function ensureInteractiveShell(page) {
 	// Nothing to protect: full wipe + reboot lands on welcome.
 	await page.context().clearCookies();
 	await gotoWithRetry(page, "/");
-	await page.evaluate(() => localStorage.clear()).catch(() => {});
+	await page.evaluate(() => localStorage.clear());
+	await page.reload({ waitUntil: "domcontentloaded" });
 	await waitForAppBoot(page);
 	return "wiped";
 }
 
-/** True when a delivery location has already been picked (persisted by the app). *//** True when a delivery location has already been picked (persisted by the app). */
+/** True when a delivery location has already been picked. */
 async function hasSelectedLocation(page) {
 	return await page.evaluate(() => {
 		try {
@@ -203,6 +217,7 @@ async function ensureLocation(page) {
 	await gotoWithRetry(page, "/");
 	await waitForAppBoot(page);
 	await ensureInteractiveShell(page);
+	require("./diagnostics").requireDependency(page, "geocoding");
 
 	// Already redirected away from welcome: location is settled only if it
 	// is persisted AND no forced location drawer is open. CAUTION: the
@@ -454,28 +469,12 @@ async function expectLoggedIn(page) {
  * Polls because the header swaps a beat after the token lands.
  */
 async function expectAuthedUI(page) {
-	await expect
-		.poll(
-			async () => {
-				const loginHidden = await page
-					.locator("#LoginBtn")
-					.isHidden()
-					.catch(() => true);
-				const accountVisible = await page
-					.getByRole("button", { name: /account/i })
-					.first()
-					.isVisible()
-					.catch(() => false);
-				const profileVisible = await page
-					.locator("#ProfileBtn")
-					.first()
-					.isVisible()
-					.catch(() => false);
-				return loginHidden || accountVisible || profileVisible;
-			},
-			{ timeout: 30_000, message: "visible UI reflects a logged-in session" }
-		)
-		.toBeTruthy();
+	await expectLoggedInUser(page, require("./env").testUser.email);
+	await expect.poll(async () => {
+		const profile = await page.locator("#ProfileBtn:visible, #ProfileSideBar:visible").count();
+		const account = await page.getByRole("button", { name: /account/i }).first().isVisible();
+		return profile > 0 || account;
+	}, { timeout: 15_000, message: "authenticated identity and account controls" }).toBeTruthy();
 }
 
 /** Assert the logged-in user object, which can hydrate a beat after the
@@ -499,16 +498,10 @@ async function expectLoggedInUser(page, email, timeout = 30_000) {
 
 /** True when the app currently has an authenticated session. */
 async function isLoggedIn(page) {
-	return await page.evaluate(() => {
-		try {
-			const token = localStorage.getItem("access_token");
-			if (token && token !== "null" && token !== "undefined") return true;
-			const vuex = JSON.parse(localStorage.getItem("vuex") || "{}");
-			return !!(vuex.User && vuex.User.isLoggedIn);
-		} catch {
-			return false;
-		}
-	});
+	try {
+		const state = await require("./store").readStore(page);
+		return state.authenticated === true && !!state.user;
+	} catch { return false; }
 }
 
 /** Wipe auth state but KEEP location. The location drawer is forced
@@ -544,10 +537,29 @@ async function wipeAuthKeepLocation(page) {
  *  boots with checkSessionExpiration and logs out once token_expires_in
  *  passes - long runs outlive it). No-op when already logged in, so it is
  *  safe in every beforeEach. Returns true when it had to renew. */
-async function ensureLoggedIn(page, user) {
-	if (await isLoggedIn(page)) return false;
+async function ensureLoggedIn(page, user, { minimumValidityMs = 60_000 } = {}) {
 	const u = user || require("./env").testUser;
-	console.log("[auth] session expired mid-run - logging back in");
+	const expectedId = require("./manifest").readManifest().userId;
+	const { readStore } = require('./store');
+	const { hasSessionBudget } = require('./session-recovery');
+	const initial = await readStore(page);
+	if (!initial.user && initial.hasToken && hasSessionBudget(initial.tokenExpiresAt, minimumValidityMs)) {
+		try {
+			await require('./observe').observeUntil('stored session identity hydration', () => readStore(page),
+				(state) => (state.authenticated === true && state.user) || !state.hasToken || !hasSessionBudget(state.tokenExpiresAt, minimumValidityMs),
+				{ timeout: 5_000, interval: 200 });
+		} catch (error) {
+			if (!String(error.message).startsWith('stored session identity hydration: did not settle')) throw error;
+			// No trustworthy live identity: authenticate through UI, never force a browser auth flag.
+		}
+	}
+	if (await isLoggedIn(page)) {
+		const me = await loggedInUserFromStore(page);
+		require("./policy").assertIdentity(me, u.email, expectedId);
+		if (require("./session-recovery").hasSessionBudget((await require("./store").readStore(page)).tokenExpiresAt, minimumValidityMs)) return false;
+		await wipeAuthKeepLocation(page);
+	}
+	console.log("[auth] session unavailable or near expiry - authenticating the dedicated test identity");
 	// Stable ground first: the current page may be mid-redirect after the
 	// logout bounce (header without login button). A fresh boot also settles
 	// any half-loaded state before the auth panel opens.
@@ -556,10 +568,18 @@ async function ensureLoggedIn(page, user) {
 	await ensureLocation(page);
 	await openAuthPanel(page);
 	const intent = await submitLoginIntent(page, u.email);
-	if (!intent.success) {
-		throw new Error(`re-login intent failed: ${JSON.stringify(intent).slice(0, 300)}`);
-	}
+	if (require("./policy").intentState(intent) !== "present") throw new Error("Expected test account disappeared during session recovery");
 	await completeLogin(page, { password: u.password, intentBody: intent });
+	const restored = await expectLoggedInUser(page, u.email);
+	require("./policy").assertIdentity(restored, u.email, expectedId);
+	if (!require("./session-recovery").hasSessionBudget((await require("./store").readStore(page)).tokenExpiresAt, minimumValidityMs)) throw new Error("Fresh token lifetime is insufficient for the requested observation/submission budget");
+	require("./diagnostics").markSessionRecovered(page);
+	const env = require("./env");
+	const fs = require("node:fs");
+	const previous = JSON.parse(fs.readFileSync(env.STORAGE_STATE, "utf8"));
+	const fresh = require('./auth-state').authenticatedState(await page.context().storageState(), await require('./store').readUserState(page), new URL(config.baseURL).origin);
+	fs.writeFileSync(env.STORAGE_STATE, JSON.stringify(require("./auth-state").refreshAuthState(previous, fresh, new URL(config.baseURL).origin)));
+	env.fanOutStorageStates();
 	return true;
 }
 
@@ -581,14 +601,8 @@ async function gotoAuthed(page, url) {
 
 /** Read the logged-in user object from the persisted vuex store. */
 async function loggedInUserFromStore(page) {
-	return await page.evaluate(() => {
-		try {
-			const vuex = JSON.parse(localStorage.getItem("vuex") || "{}");
-			return (vuex.User && vuex.User.loggedInUser) || null;
-		} catch {
-			return null;
-		}
-	});
+	try { return (await require("./store").readStore(page)).user || null; }
+	catch { return null; }
 }
 
 /**
@@ -622,14 +636,17 @@ async function completeSignupForm(page, user) {
 	// Consent checkbox (only when tenant enables it)
 	const consent = form.locator(".register_consent input[type=checkbox]");
 	if (await consent.isVisible().catch(() => false)) {
-		await consent.check({ force: true });
+		await consent.check();
 	}
 
 	const respPromise = page.waitForResponse(
 		(r) => r.url().includes(API.register) && r.request().method() === "POST",
 		{ timeout: 60_000 }
 	);
-	await form.locator('[data-test-id="test-zXJcBCYOrSEG"]').click();
+	respPromise.catch(() => {});
+	const signup = form.locator('[data-test-id="test-zXJcBCYOrSEG"]');
+	await expect(signup, 'signup fields must pass client validation before submission').toBeEnabled();
+	await signup.click();
 	const resp = await respPromise;
 	const body = await resp.json();
 

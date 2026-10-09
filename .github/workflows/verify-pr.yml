@@ -1,0 +1,76 @@
+name: verify-pr
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://automations-store.hyperzod.me
+      TEST_USER_EMAIL: offline-fixture@example.invalid
+      TEST_USER_PHONE: '1234567890'
+      TEST_USER_PASSWORD: offline-fixture-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: python3 -m unittest discover -s tests-unit -p '*_test.py'
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/nightly-run.ps1'), [ref]$null, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+  acceptance:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    needs: static
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: ordering-e2e-suite
+      cancel-in-progress: false
+      queue: max
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
+    timeout-minutes: 100
+    env:
+      CI: 'true'
+      E2E_LEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      TEST_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      TEST_USER_PHONE: ${{ secrets.E2E_USER_PHONE }}
+      TEST_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+      TEST_USER_FIRST_NAME: ${{ secrets.E2E_USER_FIRST_NAME }}
+      TEST_USER_COUNTRY: ${{ secrets.E2E_USER_COUNTRY }}
+      TEST_LOCATION_QUERY: ${{ secrets.E2E_LOCATION_QUERY }}
+      TEST_FALLBACK_OTP: ${{ secrets.E2E_FALLBACK_OTP }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check:env
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-acceptance-${{ github.run_id }}
+          path: test-results/
+          retention-days: 7
+  release-gate:
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    needs: [static, acceptance]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require static and trusted storefront verification
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+        run: test "$STATIC_RESULT" = success && test "$ACCEPTANCE_RESULT" = success

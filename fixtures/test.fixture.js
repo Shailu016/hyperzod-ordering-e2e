@@ -15,18 +15,38 @@
  */
 const base = require("@playwright/test");
 const { startCapture, reportFailure } = require("../utils/reporting");
+const { assessDiagnostics } = require("../utils/diagnostics");
 
 const test = base.test.extend({
+	apiDependencies: [[], { option: true }],
+	// Scenarios that intentionally reload can settle their tracked first-party
+	// API requests first, without waiting for unrelated chat/analytics traffic.
+	apiDiagnostics: async ({ _failureReporter }, use) => { await use(_failureReporter); },
 	// Auto-fixture: runs for every test without being requested.
 	_failureReporter: [
-		async ({ page }, use, testInfo) => {
+		async ({ page, apiDependencies }, use, testInfo) => {
+			require("../utils/manifest").assertManagedRun();
+			await require('../utils/api-budget').waitForApiBudget();
 			const capture = startCapture(page);
+			let fixtureError;
 			try {
 				await use(capture);
+				await capture.finish();
+				const dependencies = [...apiDependencies, ...(process.env.E2E_ORDER_FORMS === 'true' ? ['orderForms'] : [])];
+				const manifest = require('../utils/manifest').readManifest();
+				const deletedUserId = testInfo.title === 'delete the test user account via UI @smoke' && manifest.lifecycle === 'deleted-and-proven' ? manifest.userId : undefined;
+				const outcome = assessDiagnostics(capture, { page, dependencies, deletedUserId, expectedAuthRejection: testInfo.title === "rejects invalid credentials", expectedMissingPage: testInfo.title === 'custom CMS page route does not crash the shell' });
+				if (outcome.warnings.length || outcome.critical.length) await testInfo.attach("api-diagnostics", { body: Buffer.from(JSON.stringify(outcome, null, 2)), contentType: "application/json" });
+				if (outcome.warnings.length) testInfo.annotations.push({ type: "warning", description: `${outcome.warnings.length} background/recovered API diagnostics; see attachment` });
+				if (testInfo.status === "passed") base.expect(outcome.critical, "unexpected application or required API failures").toEqual([]);
+			} catch (error) {
+				fixtureError = error;
+				throw error;
 			} finally {
+				await capture.finish();
 				// testInfo.status is set by the time fixtures tear down.
-				if (testInfo.status !== testInfo.expectedStatus) {
-					const err = testInfo.error;
+				if (fixtureError || testInfo.status !== testInfo.expectedStatus) {
+					const err = fixtureError || testInfo.error;
 					await reportFailure(testInfo, page, capture, err);
 				}
 			}

@@ -36,7 +36,7 @@ test.describe("Mobile storefront @mobile", () => {
 		).toBeVisible({ timeout: 60_000 });
 	});
 
-	test("cart opens as bottom-sheet on mobile", async ({ page }) => {
+	test("mobile checkout entry preserves the exact cart and displays its items", async ({ page }) => {
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
 		await gotoWithRetry(page, "/en/home");
@@ -45,22 +45,30 @@ test.describe("Mobile storefront @mobile", () => {
 		await expect(card).toBeVisible({ timeout: 30_000 });
 		await card.click();
 		await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
-		// Shared flow (retries + mandatory-option pre-select); tap-first for
-		// mobile, falling back to click inside the flow as needed.
-		await addFirstProductToCart(page);
-		// Cart affordance on mobile: floating pill button (cart icon + divider
-		// + count, verified in cart-floating-button.vue), header cart, or CTA.
-		const cartEntry = page
-			.locator(
-				'button:has(span.scheme-floating-cart-divider), [data-test-id="nnHtWB68sfXf5vc"], .cart-floating-button, #cart-floating-button, .place-order-btn'
-			);
-		// The floating pill renders after the cart sync lands - poll.
-		await expect
-			.poll(async () => cartEntry.count(), {
-				timeout: 60_000,
-				message: "cart entry point on mobile",
-			})
-			.toBeGreaterThan(0);
+		const cart = await addFirstProductToCart(page);
+		const { readStore } = require('../../utils/store');
+		const { cartLines } = require('../../utils/policy');
+		const baseline = await readStore(page);
+		const expectedLines = cartLines(baseline.items);
+		// The actual floating Checkout button routes directly unless the tenant enables the recommendation journey.
+		const entry = page.locator('button:has(span.scheme-floating-cart-divider):visible').first();
+		await expect(entry, 'floating mobile Checkout button').toBeVisible({ timeout: 60_000 });
+		await expect(entry).toBeEnabled();
+		await entry.click();
+		if (baseline.checkoutJourneyEnabled === true) {
+			require('../../utils/diagnostics').requireDependency(page, 'recommendations');
+			const journey = page.locator('.v-bottom-sheet .checkout-journey-sheet:visible').first();
+			await expect(journey).toBeVisible();
+			const proceed = journey.locator('.checkout-journey-sheet__footer button');
+			await expect(proceed).toBeEnabled({ timeout: 30_000 });
+			await proceed.click();
+		}
+		await expect(page).toHaveURL(/\/checkout(?:[/?]|$)/);
+		const checkout = page.locator('#checkout:visible');
+		await expect(checkout).toBeVisible();
+		await expect.poll(async () => String((await readStore(page)).cart?.cart_id)).toBe(String(cart.cart_id));
+		expect(cartLines((await readStore(page)).items)).toEqual(expectedLines);
+		for (const item of baseline.items) await expect(checkout).toContainText(item.product_name);
 	});
 
 	test("profile and checkout routes fit the viewport", async ({ page }) => {
@@ -69,6 +77,8 @@ test.describe("Mobile storefront @mobile", () => {
 		for (const route of ["/en/profile", "/en/checkout"]) {
 			await gotoWithRetry(page, route);
 			await waitForAppBoot(page);
+			await expect(page).toHaveURL(new RegExp(route + "(?:$|[?])"));
+			await expect(page.locator(route.includes("checkout") ? "#checkout" : "#profile").first()).toBeVisible();
 			const overflow = await page.evaluate(() => {
 				const de = document.documentElement;
 				return de.scrollWidth - de.clientWidth;

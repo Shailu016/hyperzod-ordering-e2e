@@ -1,0 +1,42 @@
+name: schedule-freshness
+on:
+  schedule:
+    - cron: '11,26,41,56 * * * *'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ordering-schedule-monitor
+  cancel-in-progress: false
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/cache/restore@v4
+        with:
+          path: .monitor/state.json
+          key: ordering-monitor-${{ github.run_id }}
+          restore-keys: ordering-monitor-
+      - name: Inspect schedule freshness without starting tests
+        id: freshness
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-schedule.js
+      - name: Notify only on a new actionable incident
+        if: steps.freshness.outputs.notify == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python3 scripts/notify-slack.py .monitor/outcome.json
+      - name: Acknowledge delivered incident
+        if: steps.freshness.outputs.notify == 'true' && success()
+        run: node scripts/check-schedule.js --ack
+      - uses: actions/cache/save@v4
+        if: success()
+        with:
+          path: .monitor/state.json
+          key: ordering-monitor-${{ github.run_id }}

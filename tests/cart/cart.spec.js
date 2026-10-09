@@ -1,7 +1,7 @@
 // @ts-check
 const { test, expect } = require("../../fixtures/test.fixture");
 const { ensureLocation, ensureLoggedIn, waitForAppBoot, expectFirstMerchantCard, gotoWithRetry } = require("../../utils/app");
-const { addFirstProductToCart, confirmDialogIfShown, selectFirstPopupOptions } = require("../../flows/order.flow");
+const { addFirstProductToCart, openOrderableMerchant } = require("../../flows/order.flow");
 
 /**
  * Cart behavior @regression @cart.
@@ -12,18 +12,10 @@ const { addFirstProductToCart, confirmDialogIfShown, selectFirstPopupOptions } =
  */
 test.describe("Cart @cart", () => {
 	test.beforeEach(async ({ page }) => {
+		test.setTimeout(240_000);
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
-		await gotoWithRetry(page, "/en/home");
-		await waitForAppBoot(page);
-		const card = await expectFirstMerchantCard(page);
-		await expect(card, "merchant available").toBeVisible({ timeout: 30_000 });
-		await card.click();
-		await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
-		await expect(
-			page.locator(".add-product-btn .add-btn:visible").first(),
-			"merchant menu loads"
-		).toBeVisible({ timeout: 60_000 });
+		await openOrderableMerchant(page);
 	});
 
 	test("add product syncs cart API and cart persists across reload", async ({ page }) => {
@@ -31,6 +23,7 @@ test.describe("Cart @cart", () => {
 		// product options (else "You must choose one!" blocks the sync).
 		await addFirstProductToCart(page);
 
+		const exactBefore = require("../../utils/policy").cartLines((await require("../../utils/store").readStore(page)).items);
 		const before = await page.evaluate(() => {
 			try {
 				const vuex = JSON.parse(localStorage.getItem("vuex") || "{}");
@@ -52,22 +45,11 @@ test.describe("Cart @cart", () => {
 			}
 		});
 		expect(after, "cart survives reload").toBeGreaterThan(2);
+		await expect.poll(async () => require("../../utils/policy").cartLines((await require("../../utils/store").readStore(page)).items)).toEqual(exactBefore);
 	});
 
 	test("quantity stepper increases line quantity", async ({ page }) => {
-		const addBtns = page.locator(".add-product-btn .add-btn:visible");
-		await addBtns.first().click();
-		const popupAdd = page
-			.locator('[data-test-id="testNraKiacTeqVn"], .product-popup .add-btn')
-			.first();
-		try {
-			await popupAdd.waitFor({ state: "visible", timeout: 8_000 });
-			await selectFirstPopupOptions(page);
-			await popupAdd.click();
-		} catch {
-			/* simple product */
-		}
-		await confirmDialogIfShown(page);
+		await addFirstProductToCart(page);
 		const totalQty = () =>
 			page.evaluate(() => {
 				try {
@@ -86,11 +68,10 @@ test.describe("Cart @cart", () => {
 		// once and prove the line quantity actually increments. The glyphs
 		// are SVGs (verified in components/common/add-product.vue), so target
 		// the increment button by class, never by "+" text.
-		const stepper = page.locator(".add-product-btn").first();
+		const stepper = page.locator(".add-product-btn:visible").first();
 		const plus = stepper.locator("button.increment-btn").first();
 		if (!(await plus.isVisible().catch(() => false))) {
-			test.skip(true, "tenant shows no quantity stepper on menu cards");
-			return;
+			throw new Error("Required quantity-stepper fixture is missing");
 		}
 		await plus.click();
 		// Products with option groups re-open the addon-confirm sheet
@@ -106,6 +87,6 @@ test.describe("Cart @cart", () => {
 		}
 		await expect
 			.poll(totalQty, { timeout: 30_000, message: "cart quantity after increment" })
-			.toBeGreaterThan(before);
+			.toBe(before + 1);
 	});
 });

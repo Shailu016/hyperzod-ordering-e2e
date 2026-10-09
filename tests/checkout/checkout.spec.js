@@ -3,9 +3,8 @@ const { test, expect } = require("../../fixtures/test.fixture");
 const { ensureLocation, ensureLoggedIn, waitForAppBoot, expectFirstMerchantCard, gotoWithRetry } = require("../../utils/app");
 const {
 	addFirstProductToCart,
-	ensureDeliveryAddress,
-	gotoCheckout,
-	isSessionRenewed,
+	prepareCheckout,
+	openOrderableMerchant,
 } = require("../../flows/order.flow");
 
 /**
@@ -14,51 +13,30 @@ const {
  * Verified against: views/checkout.vue:1633 + cart/card/* components.
  */
 test.describe("Checkout states @checkout", () => {
-	test.beforeEach(async ({ page }) => {
+	test.beforeEach(async ({ page }, testInfo) => {
+		test.setTimeout(300_000);
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
-		await gotoWithRetry(page, "/en/home");
-		await waitForAppBoot(page);
-		const card = await expectFirstMerchantCard(page);
-		await card.click();
-		await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
-		await addFirstProductToCart(page);
-		const cart = await page.evaluate(() => {
-			try {
-				const vuex = JSON.parse(localStorage.getItem("vuex") || "{}");
-				const c = vuex.Cart && (vuex.Cart.selectedCart || (vuex.Cart.cart || [])[0]);
-				return c && (c.cart_id || c.id) ? { cart_id: c.cart_id || c.id } : null;
-			} catch {
-				return null;
-			}
-		});
-		const cartId = cart && cart.cart_id;
-		// cart-place.vue hides the place button until a delivery address is
-		// set (hideOrderPlaceButton) - select one up front so every test sees
-		// the real checkout state instead of depending on run order.
-		// SESSION_RENEWED: logout wiped local state -> restore + retry once.
-		try {
-			await gotoCheckout(page, cartId);
-			await ensureDeliveryAddress(page);
-		} catch (err) {
-			if (!isSessionRenewed(err)) throw err;
-			console.log("[checkout] session renewed in setup - restoring once");
-			await gotoCheckout(page, cartId);
-			await ensureDeliveryAddress(page);
-		}
+		await openOrderableMerchant(page);
+		const cart = await addFirstProductToCart(page);
+		const expectedLines = require("../../utils/policy").cartLines((await require("../../utils/store").readStore(page)).items);
+		await prepareCheckout(page, { cartId: cart.cart_id, expectedLines, selectPayment: testInfo.title !== 'address selection persists for delivery orders' });
 	});
 
 	test("bill summary and place-order button render", async ({ page }) => {
 		// Desktop: #OrderPlaceButton, mobile: .mobile-place-order-btn (verified
 		// in cart-place.vue). The footer hydrates after cart validation, so poll.
-		await expect
-			.poll(
-				async () =>
-					page.locator("#OrderPlaceButton, .mobile-place-order-btn").count(),
-				{ timeout: 90_000, message: "place order button should hydrate" }
-			)
-			.toBeGreaterThan(0);
-		// Bill rows render inside checkout; at minimum totals text is present.
+		await expect(require("../../flows/order.flow").placeOrderButton(page), "place order button should render visibly").toBeVisible({ timeout: 30_000 });
+		const state = await require("../../utils/store").readStore(page);
+		require("../../utils/policy").validateBill(state.cart);
+		await expect(page.locator('#summary:visible')).toContainText(state.cart.total_amount_formatted);
+		await page.locator('#summary:visible').click();
+		const details = page.locator('.v-card:visible').filter({ has: page.locator('.v-card-title').filter({ hasText: /bill details/i }) }).last();
+		await expect(details, 'expanded bill details').toBeVisible();
+		for (const key of ['sub_total_amount', 'total_amount', 'delivery_fee', 'delivery_tax', 'tax', 'packaging_charge', 'discount_amount', 'tip_amount', 'merchant_tip_amount']) {
+			if (Number(state.cart[key]) > 0 && state.cart[key + '_formatted']) await expect(details).toContainText(state.cart[key + '_formatted']);
+		}
+		// Visible bill and backend line amounts must agree.
 		const bodyText = (await page.locator("#checkout").innerText()).toLowerCase();
 		expect(
 			/total|subtotal|delivery|amount|payable/.test(bodyText),
@@ -69,10 +47,12 @@ test.describe("Checkout states @checkout", () => {
 	test("address selection persists for delivery orders", async ({ page }) => {
 		const addressCard = page.locator("#AddressCard");
 		if (!(await addressCard.isVisible().catch(() => false))) {
-			test.skip(true, "order type needs no delivery address (pickup-style)");
+			const state = await require("../../utils/store").readStore(page);
+			expect(["pickup", "dine_in"]).toContain(state.orderType || state.validation?.order_type);
+			test.skip(true, "declared pickup fixture has no delivery address");
 			return;
 		}
-		await ensureDeliveryAddress(page);
+		// beforeEach selected and verified the address; reload that exact selection without preparing again.
 		const persisted = await page.evaluate(() => {
 			try {
 				const vuex = JSON.parse(localStorage.getItem("vuex") || "{}");
@@ -82,21 +62,15 @@ test.describe("Checkout states @checkout", () => {
 			}
 		});
 		expect(persisted, "delivery address stays selected").toBeTruthy();
+		const address = (await require("../../utils/store").readStore(page)).address;
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await waitForAppBoot(page);
+		await expect.poll(async () => (await require("../../utils/store").readStore(page)).address).toEqual(address);
 	});
 
 	test("payment section lists Cash/COD when tenant offers it", async ({ page }) => {
-		const methods = page.locator("#payment-card .payment-method");
-		await expect(methods.first(), "payment methods listed").toBeVisible({
-			timeout: 60_000,
-		});
-		const text = ((await methods.allInnerTexts()).join(" | ") || "").toLowerCase();
-		if (!/cash|cod|delivery/.test(text)) {
-			test.skip(
-				true,
-				`tenant offers no COD method (offers: ${text.slice(0, 120)}) - gateways out of scope`
-			);
-			return;
-		}
-		expect(/cash|cod|delivery/.test(text)).toBeTruthy();
+		const current = await require("../../utils/store").readStore(page);
+		const { payment: chosen } = await prepareCheckout(page, { cartId: current.cart.cart_id, expectedLines: require("../../utils/policy").cartLines(current.items) });
+		expect(require("../../utils/policy").isCashMode(chosen)).toBe(true);
 	});
 });

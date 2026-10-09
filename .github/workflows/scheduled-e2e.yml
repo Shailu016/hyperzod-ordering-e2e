@@ -33,17 +33,21 @@ on:
         default: ""
         type: string
 
+permissions:
+  contents: write # Atomic identity lease refs; no administration or secret permissions.
+
 concurrency:
   # One group across BOTH workflow files: smoke and full runs share one
   # test user/cart and must never overlap, however they were triggered.
   group: ordering-e2e-suite
   cancel-in-progress: false
+  queue: max
 
 jobs:
   e2e:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.48.2-jammy
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
     timeout-minutes: 90
     env:
       BASE_URL: ${{ inputs.base_url || secrets.E2E_BASE_URL }}
@@ -55,11 +59,12 @@ jobs:
       TEST_LOCATION_QUERY: ${{ secrets.E2E_LOCATION_QUERY }}
       TEST_FALLBACK_OTP: ${{ secrets.E2E_FALLBACK_OTP }}
       CI: "true"
+      E2E_LEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Validate E2E configuration
         run: npm run check:env
@@ -80,15 +85,9 @@ jobs:
           fi
 
       - name: Run E2E suite
-        run: |
-          case "${{ steps.suite.outputs.name }}" in
-            smoke)   npm run test:smoke ;;
-            web)     npm run test:web ;;
-            android) npm run test:android ;;
-            ios)     npm run test:ios ;;
-            mobile)  npm run test:mobile ;;
-            all)     npm run test:web && npm run test:android && npm run test:ios ;;
-          esac
+        env:
+          E2E_SUITE: ${{ steps.suite.outputs.name }}
+        run: node scripts/run-suite.js "$E2E_SUITE"
 
       - name: Upload evidence (report + traces + videos)
         if: always()
@@ -97,12 +96,12 @@ jobs:
           name: e2e-results-${{ github.run_number }}
           path: |
             test-results/
-            playwright-report/
           retention-days: 14
 
       - name: Notify Slack with latest report
         if: always()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          E2E_SUITE_LABEL: full matrix
+          E2E_SUITE_LABEL: ${{ steps.suite.outputs.name }}
+          E2E_JOB_STATUS: ${{ job.status }}
         run: python3 scripts/notify-slack.py

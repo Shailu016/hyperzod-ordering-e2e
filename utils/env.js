@@ -1,14 +1,15 @@
 const path = require("path");
 const fs = require("fs");
 
-const AUTH_DIR = path.join(__dirname, "..", ".auth");
+const { runDir } = require("./manifest");
+const AUTH_DIR = runDir();
 // Legacy single-user state (kept so old specs/config keep working).
 const STORAGE_STATE = path.join(AUTH_DIR, "user.json");
 const USER_META = path.join(AUTH_DIR, "user-meta.json");
 
 // Per-project states for the multi-device matrix (web / android / ios).
-// The setup project writes user.json once, then fans it out to all three so
-// every device project starts from the same authenticated session.
+// Each managed device invocation has its own run directory and fresh setup.
+// Setup fans out states inside that directory so cleanup can use desktop Chrome.
 const PROJECTS = ["web", "android", "ios"];
 function storageStateFor(project) {
 	if (!project || project === "setup" || project === "cleanup" || project === "web") {
@@ -57,6 +58,7 @@ function readUserMeta() {
 /** Reject invalid targets before Playwright can navigate or print secret values. */
 function validateBaseURL(value) {
 	try {
+		require("./policy").assertAllowedTarget(value, process.env.E2E_ALLOWED_ORIGINS);
 		const url = new URL(value);
 		if (["http:", "https:"].includes(url.protocol) && url.hostname && !url.username && !url.password) return;
 	} catch { /* report the variable name, never its secret value */ }
@@ -74,17 +76,21 @@ function validateEnv() {
 	if (!testUser.email) missing.push("TEST_USER_EMAIL");
 	if (!testUser.phone) missing.push("TEST_USER_PHONE");
 	if (!testUser.password) missing.push("TEST_USER_PASSWORD");
+	if (process.env.CI && !(process.env.TEST_USER_PASSWORD || "").trim()) missing.push("TEST_USER_PASSWORD");
 	if (!config.locationQuery) missing.push("TEST_LOCATION_QUERY");
 	// A dash is a nonempty placeholder, not usable CI configuration.
 	for (const name of ["TEST_USER_FIRST_NAME", "TEST_USER_EMAIL", "TEST_USER_PHONE", "TEST_USER_COUNTRY", "TEST_USER_PASSWORD", "TEST_LOCATION_QUERY", "TEST_FALLBACK_OTP"]) {
 		if (/^[-–—]+$/.test((process.env[name] || "").trim()) && !missing.includes(name)) missing.push(name);
 	}
-	return missing;
+	if (testUser.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testUser.email)) missing.push("TEST_USER_EMAIL_FORMAT");
+	if (testUser.phone && !/^\d{7,15}$/.test(testUser.phone)) missing.push("TEST_USER_PHONE_FORMAT");
+	if (config.locationQuery && !config.locationQuery.trim()) missing.push("TEST_LOCATION_QUERY");
+	return [...new Set(missing)];
 }
 
 /**
  * Copy the canonical setup session to every device project state.
- * Keeps web/android/ios in sync without running signup three times.
+ * Keeps the current invocation's device and desktop cleanup state in sync.
  */
 function fanOutStorageStates() {
 	ensureAuthDir();
