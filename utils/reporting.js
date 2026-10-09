@@ -120,7 +120,15 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
   // Finish reading response bodies before explicit document navigation invalidates CDP resources.
   const navigations = ['goto', 'reload'].filter((name) => typeof page[name] === 'function').map((name) => {
     const original = page[name];
-    page[name] = async (...args) => { await capture.drain(); return original.apply(page, args); };
+    page[name] = async (...args) => {
+      await capture.drain();
+      // Chromium can cancel the old document's requests before it emits the
+      // new document request or framenavigated. Record our explicit navigation
+      // boundary before calling the browser, preserving proof for those reads.
+      documentGeneration++;
+      navigationGeneration++;
+      return original.apply(page, args);
+    };
     return [name, original];
   });
   let finished;

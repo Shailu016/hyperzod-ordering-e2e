@@ -4,6 +4,24 @@ const { EventEmitter } = require('node:events');
 const { startCapture } = require('../utils/reporting');
 const { assessDiagnostics } = require('../utils/diagnostics');
 
+test('explicit navigation proves cancellation even before the browser emits its next navigation event', async () => {
+  const previous = process.env.BASE_URL;
+  process.env.BASE_URL = 'https://automations-store.hyperzod.me';
+  try {
+    for (const method of ['GET', 'POST']) {
+      const page = new EventEmitter();
+      const request = { method: () => method, url: () => 'https://api.hyperzod.app/store/v1/cart', resourceType: () => 'xhr', failure: () => ({ errorText: 'net::ERR_ABORTED' }) };
+      page.goto = async () => { page.emit('requestfailed', request); };
+      const capture = startCapture(page);
+      page.emit('request', request);
+      await page.goto('/next');
+      await capture.finish();
+      assert.equal(capture.events[0].navigationDiscarded, true);
+      assert.equal(assessDiagnostics(capture).critical.length, method === 'GET' ? 0 : 1);
+    }
+  } finally { if (previous === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = previous; }
+});
+
 test('a main-frame SPA route change proves discarded reads without allowing cancelled cart mutations', async () => {
   const previous = process.env.BASE_URL;
   process.env.BASE_URL = 'https://automations-store.hyperzod.me';
