@@ -25,7 +25,7 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
     const key = event.kind === 'console' ? 'consoleErrors' : event.kind === 'page' ? 'pageErrors' : event.kind === 'cancelled' ? 'cancelledRequests' : 'failedRequests';
     if (capture[key].length < 100) capture[key].push(event.message);
   };
-  const requestEvent = (request) => ({ method: request.method(), url: request.url(), key: crypto.createHash('sha256').update(`${request.method()} ${request.url()} ${request.postData?.() || ''}`).digest('hex'), sequence: ++sequence });
+  const requestEvent = (request) => ({ method: request.method(), resourceType: request.resourceType?.(), url: request.url(), key: crypto.createHash('sha256').update(`${request.method()} ${request.url()} ${request.postData?.() || ''}`).digest('hex'), sequence: ++sequence });
   listen('framenavigated', (frame) => {
     if (frame === page.mainFrame?.() && frame.url() !== mainURL) {
       mainURL = frame.url(); navigationGeneration++;

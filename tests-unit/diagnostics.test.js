@@ -4,6 +4,15 @@ const { assessDiagnostics, requireDependency } = require('../utils/diagnostics')
 const event = (path, extra = {}) => ({ kind: 'http', method: 'GET', status: 500, url: `https://api.hyperzod.app${path}`, key: path, sequence: 1, message: 'request failed', ...extra });
 const assess = (events, options, successfulReads = {}) => assessDiagnostics({ events, successfulReads }, options);
 
+test('browser-cancelled images are visible warnings; API reads and broken image responses still fail', () => {
+  const image = event('/assets/banner.svg', { kind: 'cancelled', resourceType: 'image' });
+  assert.equal(assess([image]).warnings.length, 1);
+  for (const resourceType of ['fetch', 'xhr', 'script', 'document', undefined]) {
+    assert.equal(assess([{ ...image, resourceType }]).critical.length, 1);
+  }
+  assert.equal(assess([{ ...image, kind: 'http', status: 404 }]).critical.length, 1);
+});
+
 test('closing an optional chat socket is a warning, while chat dependencies and other sockets remain critical', () => {
   const closing = { kind: 'console', url: 'https://browser.sentry-cdn.com/bundle.js', message: "WebSocket connection to 'wss://chat.apps.hyperzod.com/connection/websocket' failed: WebSocket is closed before the connection is established." };
   assert.equal(assess([closing]).warnings.length, 1);
