@@ -13,25 +13,11 @@ test.describe("Session handling @auth", () => {
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
 		expect(await isLoggedIn(page), "setup session must be logged in").toBeTruthy();
-		// Under backend throttling the post-reload session check can 401 once;
-		// retry the reload itself before calling it a real logout.
-		let alive = false;
-		for (let round = 1; round <= 3 && !alive; round++) {
-			await page.reload({ waitUntil: "domcontentloaded" });
-			await page.waitForLoadState("domcontentloaded");
-			alive = await expect
-				.poll(async () => isLoggedIn(page), { timeout: 30_000 })
-				.toBeTruthy()
-				.then(() => true)
-				.catch(() => false);
-			if (!alive && round < 3) {
-				console.log(`[session] reload round ${round}: not logged in yet - retrying (throttle?)`);
-			}
-		}
-		expect(
-			alive,
-			"session should survive reload (access_token / vuex.User)"
-		).toBeTruthy();
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await expect.poll(() => isLoggedIn(page), {
+			timeout: 30_000,
+			message: "session should survive one reload without reauthentication or another reload",
+		}).toBe(true);
 		await expectAuthedUI(page);
 	});
 

@@ -35,6 +35,7 @@ The runner does not send notifications. `E2E_NOTIFICATIONS_DISABLED=true` also b
 `E2E_ENV_FILE` can select an existing private env file without copying it into another checkout.
 Missing cleanup proof or an ambiguous order stops subsequent devices and retains the lease for audited reconciliation.
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.
+When the server reports half or less of its per-minute request allowance remaining, the next scenario waits for the reset (or a full minute when no reset is supplied). This pacing preserves capacity for a complete user journey without hiding API failures. Invalid cooldown evidence stops the next scenario.
 
 ## Slack reporting
 

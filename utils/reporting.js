@@ -63,6 +63,10 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
   listen('response', (response) => {
     if (!firstParty(response.url())) return;
     const event = requestEvent(response.request()), status = response.status();
+    if (/\/(auth|store)\/v1\//.test(response.url())) {
+      try { require('./api-budget').recordRateLimit(response.headers()); }
+      catch { record({ ...event, kind: 'inspection', message: 'API remaining-request budget could not be persisted' }); }
+    }
     if (status === 429 && /\/(auth|store)\/v1\//.test(response.url())) {
       try { require('./api-budget').recordThrottle(response.headers()['retry-after'], { method: event.method, endpoint: new URL(response.url()).pathname }); }
       catch { record({ ...event, kind: 'inspection', message: 'API rate-limit cooldown could not be persisted' }); }
@@ -89,7 +93,7 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
           const detail = String(error?.message || error);
           const previousDocument = requestDocuments.has(response.request()) && requestDocuments.get(response.request()) < documentGeneration;
           const navigationDiscardedRead = previousDocument && isReadRequest(event) && /No resource with given identifier found/.test(detail);
-          record({ ...event, kind: navigationDiscardedRead ? 'cancelled' : 'inspection', status, message: `APPLICATION could not inspect JSON response ${safeURL(event.url)}${navigationDiscardedRead ? ' (read discarded by document navigation)' : ''}: ${detail}` });
+          record({ ...event, navigationDiscarded: navigationDiscardedRead, kind: navigationDiscardedRead ? 'cancelled' : 'inspection', status, message: `APPLICATION could not inspect JSON response ${safeURL(event.url)}${navigationDiscardedRead ? ' (read discarded by document navigation)' : ''}: ${detail}` });
         }
       })();
       pending.set(task, event);

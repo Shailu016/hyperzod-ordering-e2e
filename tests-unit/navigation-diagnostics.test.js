@@ -8,7 +8,7 @@ test('a main-frame SPA route change proves discarded reads without allowing canc
   const previous = process.env.BASE_URL;
   process.env.BASE_URL = 'https://automations-store.hyperzod.me';
   try {
-    for (const [method, navigate, expected] of [['GET', true, 0], ['GET', false, 1], ['POST', true, 2]]) {
+    for (const [method, navigate, expected] of [['GET', true, 0], ['GET', false, 2], ['POST', true, 2]]) {
       const page = new EventEmitter();
       let url = 'https://automations-store.hyperzod.me/en/home';
       const frame = { url: () => url };

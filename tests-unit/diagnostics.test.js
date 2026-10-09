@@ -91,7 +91,7 @@ test('Safari CORS-shaped page rejections require a proven discarded read or late
   const cancelled = event('/store/v1/merchant/menu', { kind: 'cancelled', navigationDiscarded: true });
   const pageError = { kind: 'page', url: cancelled.url, message: '//api.hyperzod.app/store/v1/merchant/menu due to access control checks.' };
   assert.equal(assess([cancelled, pageError]).critical.length, 0);
-  assert.equal(assess([{ ...cancelled, navigationDiscarded: false }, pageError]).critical.length, 1);
+  assert.equal(assess([{ ...cancelled, navigationDiscarded: false }, pageError]).critical.length, 2);
   assert.equal(assess([{ ...cancelled, method: 'POST', url: 'https://api.hyperzod.app/store/v1/cart' }, { ...pageError, url: 'https://api.hyperzod.app/store/v1/cart' }]).critical.length, 2);
   assert.equal(assess([cancelled, { ...pageError, message: 'this.getLoggedInUser is not a function' }]).critical.length, 1);
 });

@@ -35,7 +35,7 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
   const revokedAddressRead = (event) => deletedUserId != null && event.kind === 'http' && event.status === 401 && ['GET', 'HEAD'].includes(event.method) &&
     endpoint(event.url) === '/store/v1/address' && (capture.successfulAccountDeletions || []).some((deletion) => deletion.userId === String(deletedUserId) && deletion.sequence < event.sequence);
   for (const event of capture.events) {
-    let warning = (event.kind === 'cancelled' && (isReadRequest(event) || event.method === 'OPTIONS')) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
+    let warning = (event.kind === 'cancelled' && event.navigationDiscarded && isReadRequest(event)) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
     if (expectedMissingPage && event.kind === 'application' && event.method === 'GET' && endpoint(event.url) === '/store/v1/page' && /"Page not found"$/.test(event.message)) warning = true;
     // A later successful response can recover a read, never a cart/order mutation.
     const read = isReadRequest(event);
