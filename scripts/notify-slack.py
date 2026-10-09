@@ -88,7 +88,7 @@ def build_payload(summary, context):
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(rows)}})
         checks = [value for project in projects for value in project.get("critical", {}).values()]
         warnings = sum(project.get("warnings", 0) for project in projects)
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Signup / COD / cleanup: {'✅ all required checks passed' if checks and all(value == 'passed' for value in checks) else '❌ incomplete or failed'} · {warnings} tests with diagnostic warnings"}]})
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Required lifecycle checks: {'✅ all passed' if checks and all(value == 'passed' for value in checks) else '❌ incomplete or failed'} · {warnings} tests with diagnostic warnings"}]})
     failures = summary.get("failedTests", [])
     if failures:
         lines = [f"• *{clean(item.get('project'), 30)}* — {clean(item.get('title'), 180)}\n  {clean(item.get('error'), 220)}" for item in failures[:4]]
