@@ -2,7 +2,7 @@ const { test, expect } = require('../fixtures/test.fixture');
 const { testUser } = require('../utils/env');
 const { assertManagedRun, readManifest, updateManifest } = require('../utils/manifest');
 const { assertIdentity, intentState, redact } = require('../utils/policy');
-const { ensureLocation, openAuthPanel, submitLoginIntent, completeLogin, gotoWithRetry, wipeAuthKeepLocation, expectLoggedInUser, waitForAppBoot } = require('../utils/app');
+const { ensureLocation, openAuthPanel, submitLoginIntent, completeLogin, gotoWithRetry, isLoggedIn, expectLoggedInUser, waitForAppBoot } = require('../utils/app');
 const { deleteCurrentUserViaUI, proveUserGone } = require('../flows/user.flow');
 test('delete the test user account via UI @smoke', async ({ page }, testInfo) => {
   test.setTimeout(240_000);
@@ -10,7 +10,7 @@ test('delete the test user account via UI @smoke', async ({ page }, testInfo) =>
   const manifest = readManifest();
   try {
     await gotoWithRetry(page, '/');
-    await wipeAuthKeepLocation(page);
+    expect(await isLoggedIn(page), 'cleanup must start in its fresh logged-out context').toBe(false);
     await ensureLocation(page);
     await openAuthPanel(page);
     const intent = await submitLoginIntent(page, testUser.email);

@@ -116,7 +116,8 @@ module.exports = defineConfig({
 			use: {
 				...devices["Desktop Chrome"],
 				viewport: { width: 1440, height: 900 },
-				storageState: stateFor("web"),
+				// Cleanup verifies ownership through a fresh UI login, without revoking an in-flight stored session.
+				storageState: { cookies: [], origins: [] },
 			},
 		},
 	],

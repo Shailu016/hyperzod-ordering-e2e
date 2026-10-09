@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import os
 
 spec = importlib.util.spec_from_file_location('notifier', Path(__file__).with_name('notify-slack.py'))
 notifier = importlib.util.module_from_spec(spec)
@@ -46,6 +47,8 @@ def main():
             {'suite': 'smoke', 'status': 'infrastructure-failed', 'error': 'Another runner owns this test account; inspect the lease before recovering it.'},
         ]
     context = {'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e', 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_NUMBER': '21', 'BASE_URL': 'https://automations-store.hyperzod.me'}
+    if len(sys.argv) > 2:
+        context = {'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e', 'GITHUB_RUN_ID': str(summaries[0].get('githubRunId') or ''), 'GITHUB_RUN_NUMBER': os.environ.get('GITHUB_RUN_NUMBER', ''), 'BASE_URL': summaries[0].get('origin', '')}
     cards = ''.join(render(notifier.build_payload(summary, context)) for summary in summaries)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text('''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ordering report preview</title>

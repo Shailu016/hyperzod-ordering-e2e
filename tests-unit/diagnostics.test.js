@@ -4,6 +4,14 @@ const { assessDiagnostics, requireDependency } = require('../utils/diagnostics')
 const event = (path, extra = {}) => ({ kind: 'http', method: 'GET', status: 500, url: `https://api.hyperzod.app${path}`, key: path, sequence: 1, message: 'request failed', ...extra });
 const assess = (events, options, successfulReads = {}) => assessDiagnostics({ events, successfulReads }, options);
 
+test('closing an optional chat socket is a warning, while chat dependencies and other sockets remain critical', () => {
+  const closing = { kind: 'console', url: 'https://browser.sentry-cdn.com/bundle.js', message: "WebSocket connection to 'wss://chat.apps.hyperzod.com/connection/websocket' failed: WebSocket is closed before the connection is established." };
+  assert.equal(assess([closing]).warnings.length, 1);
+  assert.equal(assess([closing], { dependencies: ['chat'] }).critical.length, 1);
+  assert.equal(assess([{ ...closing, message: closing.message.replace('chat.apps.hyperzod.com', 'api.hyperzod.app') }]).critical.length, 1);
+  assert.equal(assess([{ ...closing, message: 'Unexpected checkout TypeError' }]).critical.length, 1);
+});
+
 test('chat credential reads are optional only on the exact chat host and without a chat dependency', () => {
   const chat = { ...event('/api/v1/embed/notifications/connection', { method: 'POST', status: 401 }), url: 'https://chat.apps.hyperzod.com/api/v1/embed/notifications/connection' };
   const pageError = { kind: 'page', url: chat.url, message: '//chat.apps.hyperzod.com/api/v1/embed/notifications/connection due to access control checks.' };

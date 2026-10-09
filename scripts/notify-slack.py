@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 import re
+import math
 from urllib.parse import urlparse
 
 
@@ -28,13 +29,44 @@ def http_url(value):
     return None
 
 
+def validate_summary(summary):
+    if not isinstance(summary, dict) or summary.get('status') not in ('passed', 'failed', 'running', 'infrastructure-failed'):
+        raise ValueError('Unknown report outcome')
+    if any(key in summary and not isinstance(summary[key], str) for key in ('origin', 'startedAt', 'finishedAt', 'error', 'leaseReleaseError', 'leaseRetainedReason', 'suite')):
+        raise ValueError('Invalid report metadata')
+    def counts_valid(counts):
+        return isinstance(counts, dict) and all(type(counts.get(key, 0)) is int and counts.get(key, 0) >= 0 for key in ('passed', 'failed', 'flaky', 'skipped', 'notRun'))
+    counts = summary.get('counts', {})
+    projects = summary.get('projects', [])
+    if not counts_valid(counts) or not isinstance(projects, list):
+        raise ValueError('Invalid report counts or device list')
+    for project in projects:
+        if not isinstance(project, dict) or not counts_valid(project.get('counts', {})) or not isinstance(project.get('critical', {}), dict) or type(project.get('warnings', 0)) is not int or project.get('warnings', 0) < 0:
+            raise ValueError('Invalid device outcome')
+    if not isinstance(summary.get('issues', []), list) or not all(isinstance(issue, str) for issue in summary.get('issues', [])):
+        raise ValueError('Invalid run issues')
+    if not isinstance(summary.get('failedTests', []), list) or not all(isinstance(item, dict) for item in summary.get('failedTests', [])):
+        raise ValueError('Invalid failure evidence')
+    if summary['status'] == 'passed':
+        expected = summary.get('expectedProjects')
+        names = [project.get('project') for project in projects]
+        complete = isinstance(expected, list) and expected and all(isinstance(name, str) for name in expected + names) and set(expected) == set(names) and len(names) == len(set(names))
+        healthy = counts.get('passed', 0) > 0 and not any(counts.get(key, 0) for key in ('failed', 'flaky', 'notRun')) and not summary.get('issues')
+        critical = projects and all(project.get('status') == 'passed' and project.get('critical') and all(value == 'passed' for value in project['critical'].values()) for project in projects)
+        aggregate = all(counts.get(key, 0) == sum(project.get('counts', {}).get(key, 0) for project in projects) for key in ('passed', 'failed', 'flaky', 'skipped', 'notRun'))
+        if not (complete and healthy and critical and aggregate):
+            raise ValueError('Healthy report has incomplete or inconsistent evidence')
+    return summary
+
+
 def build_payload(summary, context):
     counts = summary.get("counts", {})
     status = summary.get("status", "infrastructure-failed")
     label = summary.get("suite", context.get("E2E_SUITE_LABEL", "e2e"))
-    number = context.get("GITHUB_RUN_NUMBER", "?")
+    number = context.get("GITHUB_RUN_NUMBER", "")
     icon = "✅" if status == "passed" else "⚠️" if status in ("running", "infrastructure-failed") else "❌"
-    heading = f"{icon} Ordering {label} · #{number} · {status.replace('-', ' ').title()}"
+    run_label = f'#{number}' if number else 'Local run'
+    heading = f"{icon} Ordering {label} · {run_label} · {status.replace('-', ' ').title()}"
     detail = " · ".join(f"{counts.get(key, 0)} {name}" for key, name in (("passed", "passed"), ("failed", "failed"), ("skipped", "skipped"), ("flaky", "flaky"), ("notRun", "not run"))) if counts else "No complete test report available"
     repository = context.get("GITHUB_REPOSITORY", "")
     run_id = context.get("GITHUB_RUN_ID", "")
@@ -106,9 +138,11 @@ def deliver(payload, webhook, opener=None, wait=None):
                 raise RuntimeError(f"Slack delivery failed (HTTP {error.code})") from None
             retry_after = error.headers.get("Retry-After", "1")
             try:
-                delay = min(float(retry_after), 10)
+                delay = float(retry_after)
             except ValueError:
                 delay = 1
+            if not math.isfinite(delay) or delay > 60:
+                raise RuntimeError('Slack Retry-After exceeds the delivery wait budget; no early retry was sent') from None
             wait(max(0, delay))
         except (urllib.error.URLError, TimeoutError, ValueError):
             if attempt == 2:
@@ -123,9 +157,7 @@ def main():
     destination = sys.argv[1] if len(sys.argv) > 1 else "test-results/summary.json"
     try:
         with open(destination, encoding="utf-8") as source:
-            summary = json.load(source)
-            if not isinstance(summary, dict):
-                raise ValueError('Report must be an object')
+            summary = validate_summary(json.load(source))
     except (OSError, ValueError):
         summary = {"status": "infrastructure-failed", "error": "No valid run report; inspect configuration, install, runner, or cancellation steps"}
     if os.environ.get("GITHUB_RUN_ID") and str(summary.get('githubRunId', '')) != os.environ['GITHUB_RUN_ID'] and not str(summary.get("runId", "")).startswith(os.environ["GITHUB_RUN_ID"] + "-"):

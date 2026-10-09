@@ -54,6 +54,8 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
         (isReadRequest(failure) && (capture.successfulReads[failure.key] || 0) > failure.sequence));
       // WebKit can emit only a page rejection for this cross-origin credential read.
       if (resourceError && event.url && new URL(event.url).hostname === 'chat.apps.hyperzod.com' && endpoint(event.url) === '/api/v1/embed/notifications/connection' && !required.has('chat')) warning = true;
+      const socket = event.message?.match(/\bwss?:\/\/[^\s'"<>]+/)?.[0];
+      if (socket && /WebSocket is closed before the connection is established/i.test(event.message) && new URL(socket).hostname === 'chat.apps.hyperzod.com' && endpoint(socket) === '/connection/websocket' && !required.has('chat')) warning = true;
       if (event.url && /^(https:\/\/fonts\.(googleapis|gstatic)\.com\/|.*\/favicon\.ico$)/.test(event.url) && resourceError) warning = true;
       if (event.url && /^https:\/\/[a-z0-9.-]+\.ingest(?:\.us)?\.sentry\.io\/api\/\d+\/envelope\//.test(event.url) && resourceError) warning = true;
     }
