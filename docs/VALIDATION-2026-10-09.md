@@ -2,6 +2,8 @@
 
 **Decision: keep the pull request in draft. Production acceptance is incomplete.**
 
+**Current scope:** the user restricted all further work to the personal GitHub repository `Shailu016/hyperzod-ordering-e2e`. Storefront and backend changes, Bitbucket work and application deployments are excluded. Earlier separately prepared storefront work was not merged or deployed and is not part of this automation pull request.
+
 This record covers the production-hardening revision on `fix/production-automation-hardening` in <https://github.com/Shailu016/hyperzod-ordering-e2e/pull/1>. The checked source was synchronized into the repository after preserving the original working-tree edits in a separate backup. The pull request remains in draft until the complete live acceptance gate passes.
 
 ## Prepared changes
@@ -60,8 +62,16 @@ The notifier validates nested report evidence before accepting a healthy outcome
 
 ## Remaining work
 
-1. Confirm which storefront branch serves the automation tenant, then integrate and deploy the reviewed application correction through that repository's release process.
-2. Investigate the remaining backend rate-limit and Safari API failures against the corrected deployed application.
-3. Run the full acceptance gate again after that rollout. Keep the automation PR in draft until the required matrix passes; the passing static and targeted cleanup checks do not establish full storefront health.
+1. Investigate unresolved cancellation diagnostics using the saved evidence and offline regression fixtures in this repository. Do not suppress unexplained required API failures to obtain a passing report.
+2. Keep observed application defects visible in test reports. Application remediation and rollout are outside the user's requested scope.
+3. Keep the automation PR in draft until its required acceptance checks pass. Passing static checks and lifecycle checks alone do not establish full storefront health.
+
+## Latest automation-only verification
+
+The follow-up hardening adds proactive scenario pacing when server rate-limit headers report half or less of the allowance remaining, preserves longer `Retry-After` instructions and refuses malformed cooldown evidence. Session persistence now checks one reload without retrying a lost session. Cancellation diagnostics distinguish browser-cancelled images from API failures and record explicit document navigation before Chromium can emit cancellation events.
+
+All 67 JavaScript offline tests, 12 mocked notifier tests and lint passed. The latest smoke run tested automation commit `3c15773`: `1791569297987-e68b04ca-7769-41e6-ac22-db95d6c57f39`, finished at `2026-10-09T18:13:13.219Z` (23:43:13 IST). It completed with **11 passed, 7 failed, 0 skipped and 0 not run**. Signup, COD placement and cleanup passed; order 1049 was positively recorded and the account was proven deleted. The lease was released by the runner. The failures include the deployed address getter crash and unproven API cancellations; they are unresolved findings, not seven independently confirmed application defects.
+
+No Slack notification or manual GitHub workflow dispatch was sent. No live test is still running. No further live runs are planned under the clarified scope without a new instruction.
 
 The earlier approval-review availability block has cleared. No Slack notification or manual GitHub workflow dispatch was sent during this work.

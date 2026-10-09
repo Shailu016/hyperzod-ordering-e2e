@@ -53,6 +53,8 @@ Notifications report completed run outcomes, not scheduled start times. No exact
 
 ## Scope
 
+This personal GitHub repository owns the test runner, tests, diagnostics, reports and scheduling. Storefront application source, backend repositories, Bitbucket changes and application deployments are outside its scope. Application defects observed by the suite remain visible failures; they are not corrected by changing this test project.
+
 COD/cash only; gateway document navigation is blocked. Run-owned account cleanup is positively verified.
 Created orders are recorded and retained on the isolated test tenant; account deletion is not an order purge.
 Critical fixture capabilities must be maintained. Optional product deep links are declared through `E2E_PRODUCT_DEEP_LINK`.
