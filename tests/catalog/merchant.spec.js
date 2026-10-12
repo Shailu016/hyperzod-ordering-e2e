@@ -1,6 +1,6 @@
 const { test, expect } = require('../../fixtures/test.fixture');
 const { ensureLocation, ensureLoggedIn, gotoWithRetry, waitForAppBoot } = require('../../utils/app');
-async function openMerchant(page) {
+async function firstMerchant(page) {
   await ensureLocation(page); await ensureLoggedIn(page);
   await gotoWithRetry(page, '/en/home'); await waitForAppBoot(page);
   const card = page.locator('.merchant-card:visible').first();
@@ -8,9 +8,14 @@ async function openMerchant(page) {
   const merchant = { id: await card.getAttribute('data-merchant-id'), name: (await card.locator('.merchant-card-title').innerText()).trim() };
   expect(merchant.id).toMatch(/^[A-Za-z0-9_-]+$/);
   expect(merchant.name.length).toBeGreaterThan(0);
-  await card.click();
+  return merchant;
+}
+async function openMerchant(page) {
+  const merchant = await firstMerchant(page);
+  await page.locator('.merchant-card:visible').first().click();
   await page.waitForURL(/\/m(\/|$)/, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await expect(page.locator('h1:visible').first()).toBeVisible({ timeout: 60_000 });
+  await waitForAppBoot(page);
+  await expect(page.locator('.add-product-btn .add-btn:visible').first()).toBeVisible({ timeout: 60_000 });
   return merchant;
 }
 test('merchant search filters an unmatched query to an empty state @catalog', async ({ page }) => {
@@ -20,18 +25,18 @@ test('merchant search filters an unmatched query to an empty state @catalog', as
   const search = page.locator('#MerchantSearchPage input:visible').first();
   await expect(search).toBeVisible();
   const query = `e2e-unmatched-${process.env.E2E_RUN_ID}`;
-  await search.fill(''); await search.pressSequentially(query, { delay: 30 });
+  await search.fill(query);
   await expect(search).toHaveValue(query);
   await expect(page.locator('#MerchantSearchPage').getByText(/no results found|no products found|no item/i).first()).toBeVisible();
   await expect(page.locator('#MerchantSearchPage .add-product-btn:visible')).toHaveCount(0);
 });
 test('global search returns the exact merchant whose name supplied the query @catalog', async ({ page }) => {
-  const { id, name } = await openMerchant(page);
+  const { id, name } = await firstMerchant(page);
   expect(name.length).toBeGreaterThan(1);
   await gotoWithRetry(page, '/en/search');
   const input = page.locator('#mobileSearchInput:visible, #navSearchBar:visible').first();
   await expect(input).toBeVisible();
-  await input.fill(''); await input.pressSequentially(name, { delay: 50 });
+  await input.fill(name);
   const tab = page.locator('#search-merchant-tab:visible');
   await expect(tab).toBeVisible(); await tab.click();
   const { normalizeText } = require('../../utils/policy');

@@ -62,6 +62,11 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
       if (socket && /WebSocket is closed before the connection is established/i.test(event.message) && new URL(socket).hostname === 'chat.apps.hyperzod.com' && endpoint(socket) === '/connection/websocket' && !required.has('chat')) warning = true;
       if (event.url && /^(https:\/\/fonts\.(googleapis|gstatic)\.com\/|.*\/favicon\.ico$)/.test(event.url) && resourceError) warning = true;
       if (event.url && /^https:\/\/[a-z0-9.-]+\.ingest(?:\.us)?\.sentry\.io\/api\/\d+\/envelope\//.test(event.url) && resourceError) warning = true;
+      // The automation tenant's fixture loads these third-party SVG icons.
+      // An HTTP 500 leaves an icon missing, but does not invalidate the COD,
+      // cart or search assertions. Keep each failure visible as a warning.
+      if (event.kind === 'console' && /^https:\/\/www\.jiomart\.com\/assets\/ds2web\/jds-icons\/[a-z0-9-]+\.svg$/.test(event.url) &&
+          /^Failed to load resource: the server responded with a status of 500 \(\)$/.test(event.message)) warning = true;
       // This exact application log immediately follows a cancelled coupon read
       // in WebKit. Correlate to proven navigation; never allow the message alone,
       // HTTP failures, unresolved cancellations, or coupon-dependent scenarios.

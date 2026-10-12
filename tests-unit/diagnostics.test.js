@@ -13,6 +13,18 @@ test('browser-cancelled images are visible warnings; API reads and broken image 
   assert.equal(assess([{ ...image, kind: 'http', status: 404 }]).critical.length, 1);
 });
 
+test('known third-party fixture icon failures remain visible warnings without masking store failures', () => {
+  const icon = { kind: 'console', url: 'https://www.jiomart.com/assets/ds2web/jds-icons/star-icon.svg', message: 'Failed to load resource: the server responded with a status of 500 ()' };
+  assert.equal(assess([icon]).warnings.length, 1);
+  for (const changed of [
+    { ...icon, url: 'https://api.hyperzod.app/store/v1/order' },
+    { ...icon, url: 'https://www.jiomart.com/assets/ds2web/jds-icons/checkout.js' },
+    { ...icon, url: 'https://www.jiomart.com/assets/ds2web/jds-icons/star-icon.svg?changed=1' },
+    { ...icon, message: 'TypeError: checkout failed' },
+    { ...icon, kind: 'page' },
+  ]) assert.equal(assess([changed]).critical.length, 1);
+});
+
 test('closing an optional chat socket is a warning, while chat dependencies and other sockets remain critical', () => {
   const closing = { kind: 'console', url: 'https://browser.sentry-cdn.com/bundle.js', message: "WebSocket connection to 'wss://chat.apps.hyperzod.com/connection/websocket' failed: WebSocket is closed before the connection is established." };
   assert.equal(assess([closing]).warnings.length, 1);
