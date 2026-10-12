@@ -15,6 +15,7 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 
 `npm run lint` checks syntax, YAML, imports, focused tests, image alignment and critical module types.
 `npm run test:unit` and `python -m unittest discover -s tests-unit -p '*_test.py'` use mocks and do not contact the storefront or Slack.
+`npm run test:diagnostics:browser` verifies navigation diagnostics in Chromium and WebKit against loopback fixtures only. Install them with `npx playwright install --with-deps chromium webkit`; PR static checks run these regressions too.
 
 ## Authorized storefront execution
 
