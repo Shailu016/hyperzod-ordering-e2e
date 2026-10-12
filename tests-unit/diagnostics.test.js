@@ -19,7 +19,7 @@ test('known third-party fixture icon failures remain visible warnings without ma
   for (const changed of [
     { ...icon, url: 'https://api.hyperzod.app/store/v1/order' },
     { ...icon, url: 'https://www.jiomart.com/assets/ds2web/jds-icons/checkout.js' },
-    { ...icon, url: 'https://www.jiomart.com/assets/ds2web/jds-icons/star-icon.svg?changed=1' },
+    { ...icon, url: 'https://www.jiomart.com/assets/ds2web/jds-icons/star-icon.png' },
     { ...icon, message: 'TypeError: checkout failed' },
     { ...icon, kind: 'page' },
   ]) assert.equal(assess([changed]).critical.length, 1);

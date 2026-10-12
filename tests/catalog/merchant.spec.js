@@ -26,6 +26,8 @@ test('merchant search filters an unmatched query to an empty state @catalog', as
   await expect(search).toBeVisible();
   const query = `e2e-unmatched-${process.env.E2E_RUN_ID}`;
   await search.fill(query);
+  // vue-debounce listens to keyup; fill() alone does not trigger the search.
+  await search.press('Enter');
   await expect(search).toHaveValue(query);
   await expect(page.locator('#MerchantSearchPage').getByText(/no results found|no products found|no item/i).first()).toBeVisible();
   await expect(page.locator('#MerchantSearchPage .add-product-btn:visible')).toHaveCount(0);
@@ -37,6 +39,7 @@ test('global search returns the exact merchant whose name supplied the query @ca
   const input = page.locator('#mobileSearchInput:visible, #navSearchBar:visible').first();
   await expect(input).toBeVisible();
   await input.fill(name);
+  await input.press('Enter');
   const tab = page.locator('#search-merchant-tab:visible');
   await expect(tab).toBeVisible(); await tab.click();
   const { normalizeText } = require('../../utils/policy');

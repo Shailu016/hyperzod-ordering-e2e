@@ -68,11 +68,10 @@ test.describe("Cart @cart", () => {
 		// once and prove the line quantity actually increments. The glyphs
 		// are SVGs (verified in components/common/add-product.vue), so target
 		// the increment button by class, never by "+" text.
-		const stepper = page.locator(".add-product-btn:visible").first();
-		const plus = stepper.locator("button.increment-btn").first();
-		if (!(await plus.isVisible().catch(() => false))) {
-			throw new Error("Required quantity-stepper fixture is missing");
-		}
+		// Other visible products can still show Add buttons. Find a visible
+		// increment control, rather than choosing the first product container.
+		const plus = page.locator(".add-product-btn:visible button.increment-btn:visible").first();
+		await expect(plus, "required quantity stepper for the added product").toBeVisible({ timeout: 30_000 });
 		await plus.click();
 		// Products with option groups re-open the addon-confirm sheet
 		// ("I'LL CHOOSE" vs "REPEAT", verified live) instead of incrementing
