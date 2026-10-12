@@ -43,7 +43,7 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
     if (expectedMissingPage && event.kind === 'application' && event.method === 'GET' && endpoint(event.url) === '/store/v1/page' && /"Page not found"$/.test(event.message)) warning = true;
     // A later successful response can recover a read, never a cart/order mutation.
     const read = isReadRequest(event);
-    const transient = event.kind === 'transport' || (event.kind === 'http' && [429, 500, 502, 503, 504].includes(event.status));
+    const transient = ['transport', 'cancelled'].includes(event.kind) || (event.kind === 'http' && [429, 500, 502, 503, 504].includes(event.status));
     if (read && transient && (capture.successfulReads[event.key] || 0) > event.sequence) warning = true;
     if (read && event.kind === 'http' && event.status === 401 && recoveredSessions.has(page) && (capture.successfulReads[event.key] || 0) > event.sequence) warning = true;
     // Only a positively deleted-and-proven owned account can explain a late address 401.
@@ -62,6 +62,13 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
       if (socket && /WebSocket is closed before the connection is established/i.test(event.message) && new URL(socket).hostname === 'chat.apps.hyperzod.com' && endpoint(socket) === '/connection/websocket' && !required.has('chat')) warning = true;
       if (event.url && /^(https:\/\/fonts\.(googleapis|gstatic)\.com\/|.*\/favicon\.ico$)/.test(event.url) && resourceError) warning = true;
       if (event.url && /^https:\/\/[a-z0-9.-]+\.ingest(?:\.us)?\.sentry\.io\/api\/\d+\/envelope\//.test(event.url) && resourceError) warning = true;
+      // This exact application log immediately follows a cancelled coupon read
+      // in WebKit. Correlate to proven navigation; never allow the message alone,
+      // HTTP failures, unresolved cancellations, or coupon-dependent scenarios.
+      if (event.kind === 'console' && event.message === 'listAvailableCoupons response {data: undefined}' && !required.has('coupons')) {
+        warning = failures.some((failure) => failure.kind === 'cancelled' && failure.navigationDiscarded && failure.method === 'GET' &&
+          endpoint(failure.url) === '/store/v1/promotional/coupons/available' && failure.sequence + 1 === event.sequence);
+      }
     }
     (warning ? warnings : critical).push(event);
   }

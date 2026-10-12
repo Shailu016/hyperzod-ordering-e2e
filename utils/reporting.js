@@ -3,12 +3,13 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { redact } = require('./policy');
 const { isReadRequest } = require('./diagnostics');
+const capturesByPage = new WeakMap();
 function safeURL(url) { try { const value = new URL(url); return value.origin + value.pathname; } catch { return ''; } }
 function firstParty(url) {
   try { const host = new URL(url).hostname; return host === new URL(process.env.BASE_URL).hostname || host === 'chat.apps.hyperzod.com' || /(^|\.)hyperzod\.(app|me|dev)$/.test(host); }
   catch { return false; }
 }
-function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
+function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs = 20_000 } = {}) {
   const capture = { consoleErrors: [], pageErrors: [], failedRequests: [], cancelledRequests: [], events: [], successfulReads: Object.create(null), successfulAccountDeletions: [] };
   const pending = new Map(), requests = new Map(), listeners = [];
   let closing = false;
@@ -112,16 +113,20 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
         if (!drained) {
           const incomplete = [...pending.values(), ...(includeRequests ? [...requests.values()].map((request) => request.event) : [])];
           for (const event of incomplete) record({ ...event, kind: 'inspection', message: 'APPLICATION request/response inspection timed out; diagnostics are incomplete' });
-          break;
+          return false;
         }
       } finally { clearTimeout(timer); }
     }
+    return true;
   };
-  // Finish reading response bodies before explicit document navigation invalidates CDP resources.
+  // Settle active API calls as well as response bodies before leaving a document.
+  // Otherwise /me can be aborted during startup and trigger the app's logout path.
   const navigations = ['goto', 'reload'].filter((name) => typeof page[name] === 'function').map((name) => {
     const original = page[name];
     page[name] = async (...args) => {
-      await capture.drain();
+      if (!await capture.drain(true, navigationDrainTimeoutMs)) {
+        throw new Error('Navigation blocked: first-party API requests did not settle; inspect diagnostics');
+      }
       // Chromium can cancel the old document's requests before it emits the
       // new document request or framenavigated. Record our explicit navigation
       // boundary before calling the browser, preserving proof for those reads.
@@ -139,11 +144,19 @@ function startCapture(page, { drainTimeoutMs = 5_000 } = {}) {
       await capture.drain(true);
       for (const [event, handler] of listeners) page.removeListener(event, handler);
       for (const [name, original] of navigations) page[name] = original;
+      capturesByPage.delete(page);
       if (overflow) capture.events.push({ kind: 'inspection', message: 'Diagnostics capacity exceeded; evidence is incomplete', sequence: ++sequence, url: '' });
     })();
     return finished;
   };
+  capturesByPage.set(page, capture);
   return capture;
+}
+async function settlePageRequests(page, timeoutMs = 20_000) {
+  const capture = capturesByPage.get(page);
+  if (capture && !await capture.drain(true, timeoutMs)) {
+    throw new Error('Page API requests did not settle; inspect diagnostics');
+  }
 }
 async function visibleToastText(page) { return redact((await page.locator('.v-snackbar__content, #app-snackbar, .alert-message').allInnerTexts()).join(' | ')).slice(0, 400); }
 async function reportFailure(testInfo, page, capture, error) {
@@ -156,4 +169,4 @@ async function reportFailure(testInfo, page, capture, error) {
     await testInfo.attach('console-log', { path: destination, contentType: 'text/plain' });
   } catch { /* do not replace the original test error */ }
 }
-module.exports = { startCapture, visibleToastText, reportFailure };
+module.exports = { startCapture, settlePageRequests, visibleToastText, reportFailure };

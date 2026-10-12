@@ -15,7 +15,7 @@ test('all device reports are counted, not only the final project', () => {
 test('failed setup dependency coverage is not run, and Slack receives the useful API diagnostic', () => {
   const document = JSON.parse(report());
   document.suites[0].specs.push({ title: 'dependent UI check', tests: [{ status: 'skipped', results: [{ status: 'skipped' }] }] });
-  document.suites[0].specs.push({ title: 'addresses', tests: [{ status: 'unexpected', results: [{ status: 'failed', errors: [{ message: 'generic assertion' }], attachments: [{ name: 'api-diagnostics', path: 'diagnostics' }] }] }] });
+  document.suites[0].specs.push({ title: 'addresses', tests: [{ status: 'unexpected', results: [{ status: 'failed', errors: [{ message: 'unexpected application or required API failures' }], attachments: [{ name: 'api-diagnostics', path: 'diagnostics' }] }] }] });
   const result = summarizeReports({ expectedProjects: ['web'] }, [{ project: 'web', report: 'report', exitCode: 1 }], (name) => name === 'report' ? JSON.stringify(document) : JSON.stringify({ critical: [{ message: 'this.getLoggedInUser is not a function' }] }));
   assert.equal(result.counts.notRun, 1);
   assert.equal(result.counts.skipped, 0);

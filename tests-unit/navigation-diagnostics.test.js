@@ -10,7 +10,9 @@ test('explicit navigation proves cancellation even before the browser emits its 
   try {
     for (const method of ['GET', 'POST']) {
       const page = new EventEmitter();
-      const request = { method: () => method, url: () => 'https://api.hyperzod.app/store/v1/cart', resourceType: () => 'xhr', failure: () => ({ errorText: 'net::ERR_ABORTED' }) };
+      // Non-API resource tests the generation boundary without an active API
+      // request that should now block navigation until it settles.
+      const request = { method: () => method, url: () => 'https://api.hyperzod.app/catalog-bootstrap.json', resourceType: () => 'xhr', failure: () => ({ errorText: 'net::ERR_ABORTED' }) };
       page.goto = async () => { page.emit('requestfailed', request); };
       const capture = startCapture(page);
       page.emit('request', request);

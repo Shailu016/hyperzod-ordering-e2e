@@ -71,6 +71,9 @@ async function waitForAppBoot(page) {
 		);
 	}
 	if (recoveries > 0) console.log(`[boot] recovered after ${recoveries} backoff reload(s)`);
+	// Visible persisted UI can precede startup /me, address and coupon requests.
+	// Let those finish before the next user interaction or route transition.
+	await require('./reporting').settlePageRequests(page);
 }
 
 async function expectBootOk(page, timeout) {

@@ -48,7 +48,11 @@ function summarizeReports(initial, outcomes, readFile) {
         if (attachment) {
           try {
             const diagnostics = JSON.parse(attachment.body ? Buffer.from(attachment.body, 'base64').toString('utf8') : readFile(attachment.path, 'utf8'));
-            if (diagnostics.critical?.length) error = diagnostics.critical.slice(0, 3).map((event) => event.message).join('; ');
+            // A network side effect must not replace a concrete UI assertion,
+            // timeout, or accessibility failure. Expand only the generic guard.
+            if (diagnostics.critical?.length && /unexpected application or required API failures|^See trace and diagnostics$/.test(error)) {
+              error = diagnostics.critical.slice(0, 3).map((event) => event.message).join('; ');
+            }
           } catch { /* Keep the original assertion when diagnostic evidence is unavailable. */ }
         }
         failedTests.push({ project, title: test.title, error: require('../utils/policy').redact(error).replace(/\u001b\[[0-9;]*m/g, '').slice(0, 600) });

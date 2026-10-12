@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, '..');
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]);
 }
-const files = ['fixtures','flows','pages','tests','utils','scripts','tests-unit'].flatMap((dir) => walk(path.join(root,dir)));
+const files = ['fixtures','flows','pages','tests','utils','scripts','tests-unit','tests-browser'].flatMap((dir) => walk(path.join(root,dir)));
 try {
   for (const file of [...files, path.join(root,'playwright.config.js')].filter((file) => /\.(js|cjs)$/.test(file))) {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });

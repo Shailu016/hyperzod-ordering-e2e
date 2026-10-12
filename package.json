@@ -18,6 +18,7 @@
 		"check:env": "node scripts/check-env.js",
 		"report": "node scripts/report.js",
 		"test:unit": "node scripts/unit-tests.js",
+		"test:diagnostics:browser": "node --test tests-browser/diagnostics.cjs",
 		"check:types": "tsc --noEmit",
 		"lease:inspect": "node scripts/recover-lease.js"
 	},
