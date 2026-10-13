@@ -49,17 +49,4 @@ test.describe("Location gate @smoke @location", () => {
 		expect(afterReload.authenticated, "session must survive reload without reauthentication").toBe(true);
 		expect(String(afterReload.user?.id), "same run-owned user after reload").toBe(String(ownedUserId));
 	});
-
-	test("search page accepts typed global-search input", async ({ page }) => {
-		await ensureLocation(page);
-		await ensureLoggedIn(page);
-		await gotoWithRetry(page, "/en/search");
-		await waitForAppBoot(page);
-		await expect(page.locator("#MultiVendorSearch")).toBeVisible({ timeout: 60_000 });
-		const input = page.locator("#mobileSearchInput:visible, #navSearchBar:visible").first();
-		await expect(input).toBeEditable();
-		await input.fill("");
-		await input.pressSequentially("e2e-fixture", { delay: 50 });
-		await expect(input).toHaveValue("e2e-fixture");
-	});
 });

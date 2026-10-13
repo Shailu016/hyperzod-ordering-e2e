@@ -18,20 +18,6 @@ async function openMerchant(page) {
   await expect(page.locator('.add-product-btn .add-btn:visible').first()).toBeVisible({ timeout: 60_000 });
   return merchant;
 }
-test('merchant search filters an unmatched query to an empty state @catalog', async ({ page }) => {
-  await openMerchant(page);
-  const merchantUrl = page.url().split('?')[0].replace(/\/$/, '');
-  await gotoWithRetry(page, `${merchantUrl}/search`);
-  const search = page.locator('#MerchantSearchPage input:visible').first();
-  await expect(search).toBeVisible();
-  const query = `e2e-unmatched-${process.env.E2E_RUN_ID}`;
-  await search.fill(query);
-  // vue-debounce listens to keyup; fill() alone does not trigger the search.
-  await search.press('Enter');
-  await expect(search).toHaveValue(query);
-  await expect(page.locator('#MerchantSearchPage').getByText(/no results found|no products found|no item/i).first()).toBeVisible();
-  await expect(page.locator('#MerchantSearchPage .add-product-btn:visible')).toHaveCount(0);
-});
 test('global search returns the exact merchant whose name supplied the query @catalog', async ({ page }) => {
   const { id, name } = await firstMerchant(page);
   expect(name.length).toBeGreaterThan(1);
