@@ -27,14 +27,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-schedule.js
-      - name: Notify only on a new actionable incident
-        if: steps.freshness.outputs.notify == 'true'
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: python3 scripts/notify-slack.py .monitor/outcome.json
-      - name: Acknowledge delivered incident
-        if: steps.freshness.outputs.notify == 'true' && success()
-        run: node scripts/check-schedule.js --ack
+      # Slack incident notifications are unwired for now, and nothing acknowledges
+      # in their place: pending incidents stay visible in the workflow outputs
+      # until alerting is re-enabled, instead of being silently marked known.
       - uses: actions/cache/save@v4
         if: success()
         with:

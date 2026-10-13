@@ -38,13 +38,15 @@ Missing cleanup proof or an ambiguous order stops subsequent devices and retains
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.
 When the server reports half or less of its per-minute request allowance remaining, the next scenario waits for the reset (or a full minute when no reset is supplied). This pacing preserves capacity for a complete user journey without hiding API failures. Invalid cooldown evidence stops the next scenario.
 
-## Slack reporting
+## Email reporting
 
-Reports use one Block Kit heading, aggregate counts, per-device outcomes, critical lifecycle checks, failure details,
-IST completion time and evidence/store buttons. `not run` is distinct from a declared optional skip.
-Run `python scripts/preview-slack.py` to render examples locally, or append a summary path after the output filename
-to preview a real run. This preview has no delivery path. `DRY_RUN=1` on the notifier prints its JSON without posting.
-The Slack app's name and avatar are managed in its Slack configuration; incoming-webhook payloads cannot override them.
+Scheduled runs email one plain-text report (status, aggregate and per-device
+counts, issues, failed tests, IST completion time) to the owner's address.
+Set repository secrets `MAIL_TO`, `MAIL_USERNAME` and `MAIL_PASSWORD`
+(Gmail: full address plus an app password; optional `MAIL_SMTP_HOST`,
+`MAIL_SMTP_PORT`, `MAIL_SMTP_SECURITY`, `MAIL_FROM`). Without them the step
+logs a skip notice and stays green. Slack incoming-webhook notifications are
+unwired for now; `scripts/notify-slack.py` is retained for later restoration.
 
 ## Automatic schedules (IST)
 
