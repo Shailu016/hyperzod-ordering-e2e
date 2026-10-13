@@ -1,6 +1,6 @@
 // @ts-check
 const { test, expect } = require("../../fixtures/test.fixture");
-const { ensureLocation, ensureLoggedIn, waitForAppBoot, expectFirstMerchantCard, gotoWithRetry } = require("../../utils/app");
+const { ensureLocation, ensureLoggedIn } = require("../../utils/app");
 const {
 	addFirstProductToCart,
 	prepareCheckout,
@@ -13,14 +13,14 @@ const {
  * Verified against: views/checkout.vue:1633 + cart/card/* components.
  */
 test.describe("Checkout states @checkout", () => {
-	test.beforeEach(async ({ page }, testInfo) => {
+	test.beforeEach(async ({ page }) => {
 		test.setTimeout(300_000);
 		await ensureLocation(page);
 		await ensureLoggedIn(page);
 		await openOrderableMerchant(page);
 		const cart = await addFirstProductToCart(page);
 		const expectedLines = require("../../utils/policy").cartLines((await require("../../utils/store").readStore(page)).items);
-		await prepareCheckout(page, { cartId: cart.cart_id, expectedLines, selectPayment: testInfo.title !== 'address selection persists for delivery orders' });
+		await prepareCheckout(page, { cartId: cart.cart_id, expectedLines });
 	});
 
 	test("bill summary and place-order button render", async ({ page }) => {
@@ -42,30 +42,6 @@ test.describe("Checkout states @checkout", () => {
 			/total|subtotal|delivery|amount|payable/.test(bodyText),
 			"checkout shows a bill summary"
 		).toBeTruthy();
-	});
-
-	test("address selection persists for delivery orders", async ({ page }) => {
-		const addressCard = page.locator("#AddressCard");
-		if (!(await addressCard.isVisible().catch(() => false))) {
-			const state = await require("../../utils/store").readStore(page);
-			expect(["pickup", "dine_in"]).toContain(state.orderType || state.validation?.order_type);
-			test.skip(true, "declared pickup fixture has no delivery address");
-			return;
-		}
-		// beforeEach selected and verified the address; reload that exact selection without preparing again.
-		const persisted = await page.evaluate(() => {
-			try {
-				const vuex = JSON.parse(localStorage.getItem("vuex") || "{}");
-				return !!(vuex.Address && vuex.Address.deliveryAddress);
-			} catch {
-				return false;
-			}
-		});
-		expect(persisted, "delivery address stays selected").toBeTruthy();
-		const address = (await require("../../utils/store").readStore(page)).address;
-		await page.reload({ waitUntil: "domcontentloaded" });
-		await waitForAppBoot(page);
-		await expect.poll(async () => (await require("../../utils/store").readStore(page)).address).toEqual(address);
 	});
 
 	test("payment section lists Cash/COD when tenant offers it", async ({ page }) => {

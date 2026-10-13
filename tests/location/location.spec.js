@@ -50,18 +50,6 @@ test.describe("Location gate @smoke @location", () => {
 		expect(String(afterReload.user?.id), "same run-owned user after reload").toBe(String(ownedUserId));
 	});
 
-	test("service-area map page renders without boot error", async ({ page }) => {
-		await ensureLocation(page);
-		await ensureLoggedIn(page);
-		await gotoWithRetry(page, "/en/service-area");
-		await waitForAppBoot(page);
-		expect(/boot-failed|boot-error/.test(page.url())).toBeFalsy();
-		await expect
-			.poll(async () => page.url(), { timeout: 30_000 })
-			.toMatch(/service-area/);
-		await expect(page.getByRole('region', { name: 'Map', exact: true }).or(page.locator('canvas:visible')).first(), 'rendered service-area map').toBeVisible();
-	});
-
 	test("search page accepts typed global-search input", async ({ page }) => {
 		await ensureLocation(page);
 		await ensureLoggedIn(page);

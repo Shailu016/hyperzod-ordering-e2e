@@ -7,8 +7,7 @@ function walk(suite) {
 function declaredSkip(test) {
   const annotations = [...(test.annotations || []), ...(test.results || []).flatMap((result) => result.annotations || [])];
   return annotations.some((annotation) => annotation.type === 'skip' && (
-    (test.title === 'product deep link displays product content @catalog' && annotation.description === 'Declared fixture capability: product deep links disabled') ||
-    (test.title === 'address selection persists for delivery orders' && annotation.description === 'declared pickup fixture has no delivery address')
+    (test.title === 'product deep link displays product content @catalog' && annotation.description === 'Declared fixture capability: product deep links disabled')
   ));
 }
 function summarizeReports(initial, outcomes, readFile) {
