@@ -63,4 +63,4 @@ Created orders are recorded and retained on the isolated test tenant; account de
 Critical fixture capabilities must be maintained. Optional product deep links are declared through `E2E_PRODUCT_DEEP_LINK`.
 Custom order forms are optional on this tenant. Set `E2E_ORDER_FORMS=true` when the fixture requires them;
 known loaded forms also promote form API failures to critical diagnostics. Required custom-field entry needs its own scenario.
-Search, cart and bill assertions are intentionally strict; failures expose defects rather than being silently skipped. Accessibility, address-persistence and service-area-map scenarios were removed by owner decision and are no longer asserted here; known defects in those areas are tracked outside this suite.
+Search, cart and bill assertions are intentionally strict; failures expose defects rather than being silently skipped. Accessibility, address-persistence, service-area-map and address-page scenarios were removed by owner decision and are no longer asserted here; known defects in those areas (including the address-page `getLoggedInUser` crash) are tracked outside this suite.
