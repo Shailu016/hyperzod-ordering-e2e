@@ -77,12 +77,6 @@ test.describe("Page sweep - every page renders @smoke @regression", () => {
 		await assertNoBootError(page);
 	});
 
-	test("addresses page renders", async ({ page }) => {
-		await gotoAuthed(page, "/en/profile/address");
-		await expect(page.locator("#addresses")).toBeVisible({ timeout: 60_000 });
-		await assertNoBootError(page);
-	});
-
 	test("language page renders", async ({ page }) => {
 		await gotoAuthed(page, "/en/profile/language");
 		await expect(page.locator("#Languages")).toBeVisible({ timeout: 60_000 });

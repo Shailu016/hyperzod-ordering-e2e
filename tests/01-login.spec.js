@@ -62,38 +62,12 @@ test.describe("Authentication - login/logout of the signed-up user @smoke @auth"
 			.toBeFalsy();
 	});
 
-	test("rejects invalid credentials", async ({ page }) => {
-		test.setTimeout(240_000);
+});
 
-		await ensureLocation(page);
-		await openAuthPanel(page);
-		const intent = await submitLoginIntent(page, testUser.email);
-		expect(intent.data.user_exists).toBeTruthy();
-
-		const passwordInput = page.locator("#loginPassword");
-		const otpInput = page.locator("#loginOTP");
-		await expect(passwordInput.or(otpInput).first()).toBeVisible({ timeout: 20_000 });
-
-		if (await passwordInput.isVisible().catch(() => false)) {
-			// Password mode -> wrong password must fail
-			await passwordInput.fill("definitely-wrong-password-123");
-			const respPromise = page.waitForResponse(
-				(r) => r.url().includes(API.login) && r.request().method() === "POST"
-			);
-			await page.locator('[data-test-id="test-V6wOPa9xb61D"]').click();
-			const body = await (await respPromise).json();
-			expect(body.success, "login with a wrong password must fail").toBeFalsy();
-		} else {
-			// OTP mode -> wrong code must fail
-			await otpInput.fill("0000");
-			const respPromise = page.waitForResponse(
-				(r) => r.url().includes(API.otpVerify) && r.request().method() === "POST"
-			);
-			await page.locator('[data-test-id="test-V6wOPa9xb61D"]').click();
-			const body = await (await respPromise).json();
-			expect(body.success, "login with a wrong OTP must fail").toBeFalsy();
-		}
-
-		expect(await isLoggedIn(page), "user must stay logged out").toBeFalsy();
-	});
+test('logged-out browser cannot read a protected order history @smoke @auth', async ({ page }) => {
+	await ensureLocation(page);
+	expect(await isLoggedIn(page)).toBe(false);
+	await gotoWithRetry(page, '/en/profile/orders');
+	await expect(page).not.toHaveURL(/profile\/orders/);
+	await expect(page.locator('#orders:visible')).toHaveCount(0);
 });

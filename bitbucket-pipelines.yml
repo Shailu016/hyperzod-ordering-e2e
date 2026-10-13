@@ -1,4 +1,4 @@
-image: mcr.microsoft.com/playwright:v1.48.2-jammy
+image: mcr.microsoft.com/playwright:v1.61.1-noble
 
 options:
   max-time: 60
@@ -10,7 +10,8 @@ definitions:
         caches:
           - node
         script:
-          - npm ci --no-audit --no-fund
+          - npm ci --ignore-scripts --no-audit --no-fund
+          - npm run check:env
           - npm run lint
           - npx playwright install --with-deps chromium
           - npm run test:smoke
@@ -31,7 +32,8 @@ pipelines:
           caches:
             - node
           script:
-            - npm ci --no-audit --no-fund
+            - npm ci --ignore-scripts --no-audit --no-fund
+            - npm run check:env
             - npm run lint
             - npx playwright install --with-deps chromium
             - npm run test:web
@@ -44,7 +46,8 @@ pipelines:
           caches:
             - node
           script:
-            - npm ci --no-audit --no-fund
+            - npm ci --ignore-scripts --no-audit --no-fund
+            - npm run check:env
             - npm run lint
             - npx playwright install --with-deps chromium webkit
             - npm run test:mobile

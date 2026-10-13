@@ -25,6 +25,9 @@ const {
  * Precondition: page holds an authenticated session.
  */
 async function deleteCurrentUserViaUI(page, logPrefix) {
+	require("../utils/manifest").assertManagedRun();
+	const me = await require("../utils/app").expectLoggedInUser(page, require("../utils/env").testUser.email);
+	require("../utils/policy").assertIdentity(me, require("../utils/env").testUser.email);
 	const tag = logPrefix || "user";
 	// ---- open edit profile -> delete account -------------------------------
 	// The pencil button renders twice (desktop + mobile layouts) - use the visible one.
@@ -54,7 +57,7 @@ async function deleteCurrentUserViaUI(page, logPrefix) {
 				undefined,
 				{ timeout: 20_000 }
 			);
-			await page.waitForTimeout(2500); // async chunk + modal-fade settle
+			await expect(deleteBtns.filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
 			await expect(deleteBtns.first(), "delete account button attached").toBeAttached({
 				timeout: 10_000,
 			});
@@ -79,7 +82,7 @@ async function deleteCurrentUserViaUI(page, logPrefix) {
 	}
 	if (!clicked) {
 		// Last resort: the drawer animation never reports "stable" - force it.
-		await deleteBtns.first().click({ force: true, timeout: 15_000 });
+		await deleteBtns.filter({ visible: true }).first().click({ timeout: 15_000 });
 	}
 
 	// Confirm dialog (custom-popup inside v-dialog)
@@ -128,7 +131,7 @@ async function proveUserGone(page, email, logPrefix) {
 	await ensureLocation(page);
 	await openAuthPanel(page);
 	const result = await submitLoginIntent(page, email);
-	expect(result.success).toBeTruthy();
+	expect(require("../utils/policy").intentState(result)).toBe("absent");
 	expect(
 		result.data.user_exists,
 		"deleted user must not exist on the backend anymore"
