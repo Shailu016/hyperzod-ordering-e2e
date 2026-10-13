@@ -92,12 +92,10 @@ jobs:
             test-results/
           retention-days: 14
 
-      - name: Email latest report to owner
+      - name: Notify Slack with latest report
         if: always()
         env:
-          MAIL_TO: ${{ secrets.MAIL_TO }}
-          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
-          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           E2E_SUITE_LABEL: ${{ steps.suite.outputs.name }}
           E2E_JOB_STATUS: ${{ job.status }}
-        run: python3 scripts/notify-email.py
+        run: python3 scripts/notify-slack.py

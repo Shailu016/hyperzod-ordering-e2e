@@ -38,15 +38,12 @@ Missing cleanup proof or an ambiguous order stops subsequent devices and retains
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.
 When the server reports half or less of its per-minute request allowance remaining, the next scenario waits for the reset (or a full minute when no reset is supplied). This pacing preserves capacity for a complete user journey without hiding API failures. Invalid cooldown evidence stops the next scenario.
 
-## Email reporting
+## Slack reporting
 
-Scheduled runs email one plain-text report (status, aggregate and per-device
-counts, issues, failed tests, IST completion time) to the owner's address.
-Set repository secrets `MAIL_TO`, `MAIL_USERNAME` and `MAIL_PASSWORD`
-(Gmail: full address plus an app password; optional `MAIL_SMTP_HOST`,
-`MAIL_SMTP_PORT`, `MAIL_SMTP_SECURITY`, `MAIL_FROM`). Without them the step
-logs a skip notice and stays green. Slack incoming-webhook notifications are
-unwired for now; `scripts/notify-slack.py` is retained for later restoration.
+Scheduled runs post one Block Kit report (status, aggregate and per-device
+counts, issues, failed tests, IST completion time) to the incoming webhook.
+Without `SLACK_WEBHOOK_URL` the step fails visibly. `DRY_RUN=1` on the
+notifier prints its JSON without posting.
 
 ## Automatic schedules (IST)
 
