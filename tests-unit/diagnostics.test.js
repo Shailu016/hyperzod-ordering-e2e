@@ -16,6 +16,9 @@ test('browser-cancelled images are visible warnings; API reads and broken image 
 test('known third-party fixture icon failures remain visible warnings without masking store failures', () => {
   const icon = { kind: 'console', url: 'https://www.jiomart.com/assets/ds2web/jds-icons/star-icon.svg', message: 'Failed to load resource: the server responded with a status of 500 ()' };
   assert.equal(assess([icon]).warnings.length, 1);
+  // CI Chromium renders the reason phrase; local builds log empty parens.
+  assert.equal(assess([{ ...icon, message: 'Failed to load resource: the server responded with a status of 500 (Internal Server Error)' }]).warnings.length, 1);
+  assert.equal(assess([{ ...icon, message: 'Failed to load resource: the server responded with a status of 404 (Not Found)' }]).warnings.length, 1);
   for (const changed of [
     { ...icon, url: 'https://api.hyperzod.app/store/v1/order' },
     { ...icon, url: 'https://www.jiomart.com/assets/ds2web/jds-icons/checkout.js' },
