@@ -11,6 +11,22 @@ spec.loader.exec_module(notifier)
 
 
 class NotificationTests(unittest.TestCase):
+    def test_schedule_alert_has_no_test_failure_heading_or_missing_report_claim(self):
+        summary = {'status': 'infrastructure-failed', 'reportType': 'schedule-monitor', 'suite': 'schedule freshness',
+                   'checkedAt': '2026-10-14T14:49:07Z', 'issues': ['Full suite scheduled for 6 PM IST: GitHub has not created a run yet.']}
+        notifier.validate_summary(summary)
+        payload = notifier.build_payload(summary, {'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e', 'GITHUB_RUN_ID': '123'})
+        rendered = json.dumps(payload)
+        self.assertIn('Schedule Alert', payload['blocks'][0]['text']['text'])
+        self.assertNotIn('Infrastructure Failed', rendered)
+        self.assertNotIn('No complete test report available', rendered)
+        self.assertIn('Schedule status', rendered)
+        self.assertIn('08:19 PM IST', rendered)
+        self.assertIn('Monitor details', rendered)
+        for changed in [{'checkedAt': 'bad'}, {'checkedAt': '2026-10-14T14:49:07'}, {'status': 'passed'}, {'counts': {'passed': 1}}, {'issues': []}]:
+            with self.assertRaises(ValueError):
+                notifier.validate_summary({**summary, **changed})
+
     def test_local_report_has_no_invented_github_evidence_link(self):
         payload = notifier.build_payload({'status': 'failed', 'counts': {'failed': 1}, 'origin': 'https://automations-store.hyperzod.me'}, {})
         self.assertIn('Local run', payload['blocks'][0]['text']['text'])
