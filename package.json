@@ -19,6 +19,7 @@
 		"report": "node scripts/report.js",
 		"test:unit": "node scripts/unit-tests.js",
 		"test:diagnostics:browser": "node --test tests-browser/diagnostics.cjs",
+		"test:reports:browser": "node --test tests-browser/report-delivery.cjs",
 		"check:types": "tsc --noEmit",
 		"lease:inspect": "node scripts/recover-lease.js"
 	},

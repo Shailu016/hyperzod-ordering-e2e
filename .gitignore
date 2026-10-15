@@ -10,3 +10,6 @@ scheduled-logs/
 __pycache__/
 
 .monitor/
+
+# Generated publication workspace; never store report media in Git.
+/.report-publication/

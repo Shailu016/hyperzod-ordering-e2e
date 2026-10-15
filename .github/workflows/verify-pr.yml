@@ -25,6 +25,7 @@ jobs:
       - name: Install browsers for loopback diagnostic checks
         run: npx playwright install --with-deps chromium webkit
       - run: npm run test:diagnostics:browser
+      - run: npm run test:reports:browser
       - run: python3 -m unittest discover -s tests-unit -p '*_test.py'
       - name: Validate PowerShell syntax
         shell: pwsh

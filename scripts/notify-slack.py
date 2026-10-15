@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 import re
 import math
 from urllib.parse import urlparse
+from pathlib import Path
 
 
 def clean(value, limit=300):
@@ -22,7 +23,7 @@ def clean(value, limit=300):
 def http_url(value):
     try:
         parsed = urlparse(value)
-        if parsed.scheme in ("https", "http") and parsed.hostname and not parsed.username and not parsed.password:
+        if parsed.scheme in ("https", "http") and parsed.hostname and not parsed.username and not parsed.password and not re.search(r'[\s<>|\\]', value):
             return value
     except (ValueError, TypeError):
         pass
@@ -68,13 +69,62 @@ def validate_summary(summary):
     return summary
 
 
+def source_context(environment):
+    context = dict(environment)
+    if environment.get('E2E_REPORT_PUBLISHER') == 'true':
+        source_id = environment.get('E2E_SOURCE_RUN_ID', '')
+        attempt = environment.get('E2E_SOURCE_RUN_ATTEMPT', '')
+        if not source_id.isdigit() or not attempt.isdigit() or int(attempt) < 1:
+            raise ValueError('Invalid source run for report notification')
+        for field in ('RUN_ID', 'RUN_NUMBER', 'RUN_ATTEMPT', 'SHA', 'REF_NAME'):
+            context['GITHUB_' + field] = environment.get('E2E_SOURCE_' + field, '')
+    return context
+
+
+def publication_info(summary, context):
+    if summary.get('reportType') == 'schedule-monitor' or context.get('E2E_REPORT_PUBLISH_STATUS') != 'success':
+        return None
+    base = http_url(context.get('E2E_REPORT_BASE_URL', ''))
+    if not base or urlparse(base).scheme != 'https' or urlparse(base).query or urlparse(base).fragment:
+        raise ValueError('Invalid public report URL')
+    data = json.loads(Path(context['E2E_PUBLICATION_FILE']).read_text(encoding='utf-8'))
+    key = context.get('GITHUB_RUN_ID', '') + '-' + context.get('GITHUB_RUN_ATTEMPT', '')
+    if not re.fullmatch(r'\d+-[1-9]\d*', key) or any(data.get(field) != value for field, value in {
+        'runKey': key, 'sourceRunId': context.get('GITHUB_RUN_ID'), 'sourceAttempt': context.get('GITHUB_RUN_ATTEMPT'),
+        'sourceSha': context.get('GITHUB_SHA'), 'finishedAt': summary.get('finishedAt'), 'status': summary.get('status'),
+    }.items()):
+        raise ValueError('Public evidence belongs to another source run, attempt or revision')
+    expiry = datetime.fromisoformat(data['expiresAt'].replace('Z', '+00:00'))
+    if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
+        raise ValueError('Public evidence has expired')
+    root = base.rstrip('/') + '/runs/' + key + '/'
+    details = []
+    for item in data.get('failures', []):
+        if not re.fullmatch(r'[a-f0-9]{20}', item.get('id', '')):
+            raise ValueError('Invalid failure evidence identity')
+        detail = dict(item, url=root + 'failures/' + item['id'] + '.html')
+        for kind, extensions in [('screenshot', 'png|jpg'), ('video', 'webm|mp4')]:
+            if item.get(kind):
+                standalone = 'evidence/' + item['id'] + '-' + kind + r'\.(' + extensions + ')'
+                native = r'devices/(web|android|ios|setup)/data/[a-f0-9]{40}\.(' + extensions + ')'
+                if not re.fullmatch(standalone, item[kind]) and not (re.fullmatch(native, item[kind]) and item[kind].split('/')[1] == item.get('project')):
+                    raise ValueError('Invalid evidence media path')
+                detail[kind + 'Url'] = root + item[kind]
+        details.append(detail)
+    return {'url': root, 'failedUrl': root + '#failures', 'expiresAt': data['expiresAt'], 'retentionDays': data['retentionDays'], 'failures': details}
+
+
 def build_payload(summary, context):
+    publication = publication_info(summary, context)
     counts = summary.get("counts", {})
     status = summary.get("status", "infrastructure-failed")
     label = summary.get("suite", context.get("E2E_SUITE_LABEL", "e2e"))
     number = context.get("GITHUB_RUN_NUMBER", "")
     icon = "✅" if status == "passed" else "⚠️" if status in ("running", "infrastructure-failed") else "❌"
     run_label = f'#{number}' if number else 'Local run'
+    attempt = context.get('GITHUB_RUN_ATTEMPT', '')
+    if attempt.isdigit() and int(attempt) > 1:
+        run_label += f' · attempt {attempt}'
     schedule_monitor = summary.get('reportType') == 'schedule-monitor'
     heading = f"{icon} Ordering {label} · {run_label} · {'Schedule Alert' if schedule_monitor else status.replace('-', ' ').title()}"
     detail = " · ".join(f"{counts.get(key, 0)} {name}" for key, name in (("passed", "passed"), ("failed", "failed"), ("skipped", "skipped"), ("flaky", "flaky"), ("notRun", "not run"))) if counts else "No complete test report available"
@@ -90,19 +140,38 @@ def build_payload(summary, context):
         issues.append('Account lock retained: ' + summary['leaseRetainedReason'])
     blocks = [{"type": "header", "text": {"type": "plain_text", "text": clean(heading, 140), "emoji": True}},
               {"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule status*\n" if schedule_monitor else "*Results*\n") + detail}}]
+    target = http_url(summary.get('origin', context.get('BASE_URL', '')))
+    if target and publication:
+        blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'Target: <' + target + '|' + clean(urlparse(target).hostname, 150) + '>'}]})
     projects = summary.get("projects", [])
     if projects:
         rows = []
         for project in projects[:8]:
             c = project.get("counts", {})
             marker = "✅" if project.get("status") == "passed" else "❌"
-            rows.append(f"{marker} *{clean(project.get('project', '?'), 40)}*: {c.get('passed', 0)} passed · {c.get('failed', 0)} failed · {c.get('skipped', 0)} skipped · {c.get('notRun', 0)} not run")
+            device = {'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS'}.get(project.get('project'), project.get('project', '?'))
+            rows.append(f"{marker} *{clean(device, 40)}*: {c.get('passed', 0)} passed · {c.get('failed', 0)} failed" + (f" · {c.get('skipped', 0)} skipped" if c.get('skipped') else '') + (f" · {c.get('notRun', 0)} not run" if c.get('notRun') else ''))
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(rows)}})
         checks = [value for project in projects for value in project.get("critical", {}).values()]
         warnings = sum(project.get("warnings", 0) for project in projects)
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Required lifecycle checks: {'✅ all passed' if checks and all(value == 'passed' for value in checks) else '❌ incomplete or failed'} · {warnings} tests with diagnostic warnings"}]})
     failures = summary.get("failedTests", [])
-    if failures:
+    if publication and publication['failures']:
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '*Failed cases*'}})
+        for index, item in enumerate(publication['failures'][:3]):
+            device = {'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS'}.get(item.get('project'), item.get('project', '?'))
+            message = f"*{index + 1}. {clean(device, 40)} · {clean(item.get('title'), 180)}*\n{clean(str(item.get('error', '')).split(chr(10) + chr(10))[0], 220)}\n<{item['url']}|Inspect failure>"
+            if item.get('screenshotUrl'):
+                message += f" · <{item['screenshotUrl']}|View screenshot>"
+            if item.get('videoUrl'):
+                message += f" · <{item['url']}#video|Watch video>"
+            block = {'type': 'section', 'text': {'type': 'mrkdwn', 'text': message}}
+            if index < 2 and item.get('screenshotUrl'):
+                block['accessory'] = {'type': 'image', 'image_url': item['screenshotUrl'], 'alt_text': clean('Failure screenshot: ' + item.get('title', ''), 300)}
+            blocks.append(block)
+        if len(publication['failures']) > 3:
+            blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': f"{len(publication['failures']) - 3} more failed cases in the full report"}]})
+    elif failures:
         lines = [f"• *{clean(item.get('project'), 30)}* — {clean(item.get('title'), 180)}\n  {clean(item.get('error'), 220)}" for item in failures[:4]]
         if len(failures) > 4:
             lines.append(f"…and {len(failures) - 4} more; open evidence below")
@@ -127,15 +196,26 @@ def build_payload(summary, context):
     if timing:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " | ".join(timing)}]})
     buttons = []
+    if publication:
+        buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'Open full report'}, 'url': publication['url']})
+        if failures or publication['failures']:
+            buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'View failed cases'}, 'url': publication['failedUrl']})
     if url:
-        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Monitor details" if schedule_monitor else "Run & evidence"}, "url": url})
+        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Monitor details" if schedule_monitor else "GitHub run" if publication else "Run & evidence"}, "url": url})
     origin = http_url(summary.get("origin", context.get("BASE_URL", "")))
-    if origin:
+    if origin and not publication:
         buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Open test store"}, "url": origin})
     if buttons:
         blocks.append({"type": "actions", "elements": buttons})
+    if publication:
+        blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': f"Screenshots and videos in the report · Evidence retained for {publication['retentionDays']} days"}]})
     # Fallback is for screen readers and notification previews; only blocks render in-channel.
-    return {"text": clean(heading) + " — " + detail, "blocks": blocks, "unfurl_links": False, "unfurl_media": False}
+    fallback = clean(heading) + " — " + detail
+    if failures:
+        fallback += '. Failures: ' + '; '.join(clean(item.get('title'), 120) for item in failures[:3])
+    if publication:
+        fallback += '. Report: ' + publication['url']
+    return {"text": fallback, "blocks": blocks, "unfurl_links": False, "unfurl_media": False}
 
 
 def deliver(payload, webhook, opener=None, wait=None):
@@ -169,17 +249,28 @@ def main():
     if os.environ.get('E2E_NOTIFICATIONS_DISABLED') == 'true':
         print('Notifications disabled for this execution')
         return 0
+    try:
+        context = source_context(os.environ)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     destination = sys.argv[1] if len(sys.argv) > 1 else "test-results/summary.json"
     try:
         with open(destination, encoding="utf-8") as source:
             summary = validate_summary(json.load(source))
     except (OSError, ValueError):
         summary = {"status": "infrastructure-failed", "error": "No valid run report; inspect configuration, install, runner, or cancellation steps"}
-    if os.environ.get("GITHUB_RUN_ID") and str(summary.get('githubRunId', '')) != os.environ['GITHUB_RUN_ID'] and not str(summary.get("runId", "")).startswith(os.environ["GITHUB_RUN_ID"] + "-"):
+    if context.get("GITHUB_RUN_ID") and str(summary.get('githubRunId', '')) != context['GITHUB_RUN_ID'] and not str(summary.get("runId", "")).startswith(context["GITHUB_RUN_ID"] + "-"):
         summary = {"status": "infrastructure-failed", "error": "Report is missing or belongs to another run; open workflow evidence"}
-    if os.environ.get("E2E_JOB_STATUS") in ("failure", "cancelled") and summary.get("status") == "passed":
+    if context.get("E2E_JOB_STATUS") in ("failure", "cancelled", "timed_out") and summary.get("status") == "passed":
         summary = dict(summary, status="infrastructure-failed", error="Workflow infrastructure failed after tests")
-    payload = build_payload(summary, os.environ)
+    if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success':
+        summary = dict(summary, status='infrastructure-failed', error='Report publishing failed; inspect the source GitHub run and any available artifacts')
+    try:
+        payload = build_payload(summary, context)
+    except (OSError, ValueError, KeyError):
+        summary = dict(summary, status='infrastructure-failed', error='Published report evidence could not be validated; use the GitHub run artifacts')
+        payload = build_payload(summary, dict(context, E2E_REPORT_PUBLISH_STATUS='failure'))
     if os.environ.get("DRY_RUN") == "1":
         print(json.dumps(payload))
         return 0
