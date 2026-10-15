@@ -13,8 +13,18 @@ spec.loader.exec_module(notifier)
 
 
 def markup(value):
+    links = []
+    def link(match):
+        url, label = match.groups()
+        if not notifier.http_url(url):
+            return label
+        links.append('<a href="' + html.escape(url, quote=True) + '">' + html.escape(label) + '</a>')
+        return '\x00LINK' + str(len(links) - 1) + '\x00'
+    value = re.sub(r'<([^<>|]+)\|([^<>]+)>', link, value)
     safe = html.escape(html.unescape(value))
     safe = re.sub(r'\*([^*]+)\*', r'<strong>\1</strong>', safe)
+    for index, item in enumerate(links):
+        safe = safe.replace('\x00LINK' + str(index) + '\x00', item)
     return safe.replace('\n', '<br>')
 
 
@@ -25,7 +35,9 @@ def render(payload):
         if kind == 'header':
             parts.append('<h2>' + html.escape(block['text']['text']) + '</h2>')
         elif kind == 'section':
-            parts.append('<p>' + markup(block['text']['text']) + '</p>')
+            image = block.get('accessory', {})
+            preview = '<img class="thumbnail" src="' + html.escape(image['image_url'], quote=True) + '" alt="' + html.escape(image.get('alt_text', ''), quote=True) + '">' if image.get('type') == 'image' else ''
+            parts.append('<div class="section"><p>' + markup(block['text']['text']) + '</p>' + preview + '</div>')
         elif kind == 'context':
             parts.append('<small>' + ' | '.join(markup(element['text']) for element in block['elements']) + '</small>')
         elif kind == 'actions':
@@ -49,10 +61,12 @@ def main():
     context = {'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e', 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_NUMBER': '21', 'BASE_URL': 'https://automations-store.hyperzod.me'}
     if len(sys.argv) > 2:
         context = {'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e', 'GITHUB_RUN_ID': str(summaries[0].get('githubRunId') or ''), 'GITHUB_RUN_NUMBER': os.environ.get('GITHUB_RUN_NUMBER', ''), 'BASE_URL': summaries[0].get('origin', '')}
+    if len(sys.argv) > 3:
+        context.update(json.loads(Path(sys.argv[3]).read_text(encoding='utf-8')))
     cards = ''.join(render(notifier.build_payload(summary, context)) for summary in summaries)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text('''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ordering report preview</title>
-<style>body{background:#f4f5f7;color:#1d1c1d;font:15px/1.5 system-ui,sans-serif;margin:0;padding:32px}main{max-width:780px;margin:auto}h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:0}article{background:white;border:1px solid #e0e1e5;border-radius:12px;margin:22px 0;padding:22px}p{margin:16px 0}small{display:block;color:#616061;margin:14px 0}.actions{display:flex;gap:10px;margin-top:18px}a{border:1px solid #c7cacd;border-radius:6px;padding:6px 12px;text-decoration:none;color:#1264a3;font-weight:600}.note{color:#616061;margin:0 0 24px}</style>
+<style>body{background:#f4f5f7;color:#1d1c1d;font:15px/1.5 system-ui,sans-serif;margin:0;padding:32px}main{max-width:780px;margin:auto}h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:0}article{background:white;border:1px solid #e0e1e5;border-radius:12px;margin:22px 0;padding:22px}p{margin:16px 0}small{display:block;color:#616061;margin:14px 0}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}a{text-decoration:none;color:#1264a3}.actions a{border:1px solid #c7cacd;border-radius:6px;padding:6px 12px;font-weight:600}.section{display:flex;align-items:center;gap:20px}.section p{flex:1}.thumbnail{width:90px;height:110px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid #ddd}.note{color:#616061;margin:0 0 24px}</style>
 <main><h1>Ordering automation · Slack report</h1><p class="note">Local layout preview. Example data unless a run summary was provided. No Slack messages sent.</p>''' + cards + '</main></html>', encoding='utf-8')
     print(str(output.resolve()))
 

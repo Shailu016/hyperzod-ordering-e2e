@@ -16,6 +16,7 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 `npm run lint` checks syntax, YAML, imports, focused tests, image alignment and critical module types.
 `npm run test:unit` and `python -m unittest discover -s tests-unit -p '*_test.py'` use mocks and do not contact the storefront or Slack.
 `npm run test:diagnostics:browser` verifies navigation diagnostics in Chromium and WebKit against loopback fixtures only. Install them with `npx playwright install --with-deps chromium webkit`; PR static checks run these regressions too.
+`npm run test:reports:browser` verifies generated reports, real fixture screenshots, recordings and video downloads locally. The controlled fixture failures exercise reporting; they are not storefront failures.
 
 ## Authorized storefront execution
 
@@ -40,10 +41,16 @@ When the server reports half or less of its per-minute request allowance remaini
 
 ## Slack reporting
 
-Scheduled runs post one Block Kit report (status, aggregate and per-device
-counts, issues, failed tests, IST completion time) to the incoming webhook.
-Without `SLACK_WEBHOOK_URL` the step fails visibly. `DRY_RUN=1` on the
-notifier prints its JSON without posting.
+After a scheduled run completes, the report publisher deploys its Playwright
+reports to GitHub Pages, verifies the exact source run/attempt, then sends the
+existing Slack webhook a summary, failure thumbnails and links to screenshots,
+videos and the full report. Publication errors remain visible with GitHub evidence
+as the fallback. Passing evidence is retained for 3 days; failed evidence for 14.
+Generated reports use Actions storage and Pages deployments; no report files enter Git history.
+Pages evidence is public. See [docs/REPORT-DELIVERY.md](docs/REPORT-DELIVERY.md)
+for setup, retention, exposure, rollout and local previews.
+Without `SLACK_WEBHOOK_URL` delivery fails visibly. `DRY_RUN=1` prints the
+payload without posting; `E2E_NOTIFICATIONS_DISABLED=true` blocks delivery entirely.
 
 ## Automatic schedules (IST)
 

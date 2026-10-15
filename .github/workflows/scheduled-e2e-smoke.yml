@@ -52,6 +52,7 @@ jobs:
       TEST_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
       TEST_LOCATION_QUERY: ${{ secrets.E2E_LOCATION_QUERY }}
       TEST_FALLBACK_OTP: ${{ secrets.E2E_FALLBACK_OTP }}
+      REPORT_DELIVERY: pages-v1
       CI: "true"
       E2E_LEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -83,19 +84,32 @@ jobs:
           E2E_SUITE: ${{ steps.suite.outputs.name }}
         run: node scripts/run-suite.js "$E2E_SUITE"
 
+      - name: Select evidence retention
+        if: always()
+        id: retention
+        env:
+          E2E_JOB_STATUS: ${{ job.status }}
+        shell: python3 {0}
+        run: |
+          import json, os
+          from pathlib import Path
+          try:
+              summary = json.loads(Path('test-results/summary.json').read_text())
+          except (OSError, ValueError):
+              summary = {}
+          owned = str(summary.get('runId', '')).startswith(os.environ['GITHUB_RUN_ID'] + '-')
+          days = 3 if owned and summary.get('status') == 'passed' and os.environ['E2E_JOB_STATUS'] == 'success' else 14
+          identity = {'id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'head_sha': os.environ['GITHUB_SHA']}
+          Path('test-results').mkdir(exist_ok=True)
+          Path('test-results/source.json').write_text(json.dumps(identity), encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'days={days}\n')
+
       - name: Upload evidence (report + traces + videos)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-smoke-${{ github.run_number }}
+          name: e2e-smoke-${{ github.run_number }}-attempt-${{ github.run_attempt }}
           path: |
             test-results/
-          retention-days: 14
-
-      - name: Notify Slack with latest report
-        if: always()
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          E2E_SUITE_LABEL: ${{ steps.suite.outputs.name }}
-          E2E_JOB_STATUS: ${{ job.status }}
-        run: python3 scripts/notify-slack.py
+          retention-days: ${{ steps.retention.outputs.days || 14 }}
