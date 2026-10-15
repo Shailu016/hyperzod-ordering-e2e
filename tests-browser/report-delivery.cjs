@@ -24,7 +24,9 @@ test('public reports preserve native reports, screenshots, playable videos and S
       test('Controlled local fixture: checkout assertion',async({page})=>{
         await page.route('**/*',route=>route.abort());
         await page.setContent('<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font:20px system-ui;background:#f4f6fa;padding:24px"><h1>Controlled local fixture</h1><p>Report delivery test only. No storefront connection.</p><h2>Order preview</h2><p>Example basket: 2 items</p><button>Continue checkout</button><p id="status">Payment required</p></body></html>');
-        await expect(page.locator('#status')).toHaveText('Checkout complete',{timeout:250});
+        // Keep the controlled failure visible long enough to record decoded frames
+        // on fast Linux runners as well as desktop machines.
+        await expect(page.locator('#status')).toHaveText('Checkout complete',{timeout:2000});
       });`);
     const config = path.join(temporary, 'fixture.config.cjs');
     fs.writeFileSync(config, `const {devices}=require(${JSON.stringify(require.resolve('@playwright/test'))});
@@ -115,11 +117,26 @@ test('public reports preserve native reports, screenshots, playable videos and S
         // Windows WebKit also stalls on the original raw WebM. Verify its
         // explicit download fallback; Chromium and Linux WebKit must play it.
         if (!(process.platform === 'win32' && engine === webkit)) {
-          await page.locator('video').evaluate(async (video) => {
+          await page.locator('video').evaluate((video) => new Promise((resolve, reject) => {
+            const cleanup = () => {
+              clearTimeout(timer);
+              video.removeEventListener('timeupdate', progressed);
+              video.removeEventListener('playing', progressed);
+            };
+            const progressed = () => {
+              if (video.currentTime > 0 && video.readyState >= 2) { cleanup(); resolve(); }
+            };
+            const timer = setTimeout(() => {
+              cleanup();
+              reject(new Error('No decoded playback progress: ' + JSON.stringify({ state: video.readyState, time: video.currentTime, duration: video.duration, ended: video.ended, error: video.error?.message })));
+            }, 8000);
+            // Observe progress before play: a short recording can finish before
+            // a later polling assertion begins in WebKit.
+            video.addEventListener('timeupdate', progressed);
+            video.addEventListener('playing', progressed);
             video.muted = true;
-            await Promise.race([video.play(), new Promise((_, reject) => setTimeout(() => reject(new Error('Video did not start: ' + JSON.stringify({ state: video.readyState, error: video.error?.message }))), 8000))]);
-          });
-          await page.waitForFunction(() => document.querySelector('video').currentTime > 0 && document.querySelector('video').readyState >= 2);
+            video.play().catch((error) => { cleanup(); reject(error); });
+          }));
         }
         const downloadEvent = page.waitForEvent('download');
         await page.getByRole('link', { name: 'Download video', exact: true }).click();
