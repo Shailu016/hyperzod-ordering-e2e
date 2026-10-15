@@ -6,9 +6,9 @@ const root = path.resolve(__dirname, '..');
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]);
 }
-const files = ['fixtures','flows','pages','tests','utils','scripts','tests-unit','tests-browser'].flatMap((dir) => walk(path.join(root,dir)));
+const files = [...['fixtures','flows','pages','tests','utils','scripts','tests-unit','tests-browser'].flatMap((dir) => walk(path.join(root,dir))), ...['worker.mjs', 'configure.cjs'].map((file) => path.join(root, 'scheduler', file))];
 try {
-  for (const file of [...files, path.join(root,'playwright.config.js')].filter((file) => /\.(js|cjs)$/.test(file))) {
+  for (const file of [...files, path.join(root,'playwright.config.js')].filter((file) => /\.(js|cjs|mjs)$/.test(file))) {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
     if (file.startsWith(path.join(root,'tests') + path.sep) && /\btest(?:\.describe)?\.only\s*\(/.test(fs.readFileSync(file,'utf8'))) throw new Error(`Focused test forbidden: ${file}`);
   }

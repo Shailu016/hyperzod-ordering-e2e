@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ordering-e2e-scheduler",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": {
+    "GITHUB_REPOSITORY": "Shailu016/hyperzod-ordering-e2e",
+    "GITHUB_REPOSITORY_ID": "1405775565",
+    "SCHEDULER_ENABLED": "false",
+    "SCHEDULER_ENABLED_AT": ""
+  }
+}

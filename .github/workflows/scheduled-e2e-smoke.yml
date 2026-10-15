@@ -9,6 +9,13 @@
 
 name: scheduled-e2e-smoke
 
+run-name: >-
+  ${{ inputs.schedule_slot && format('Ordering smoke · slot {0}', inputs.schedule_slot) ||
+      (github.event_name == 'schedule' && format('Ordering smoke · native {0}', github.event.schedule) || 'Ordering smoke · manual') }}
+
+env:
+  E2E_SCHEDULE_PROTOCOL: slots-v1
+
 on:
   schedule:
     - cron: "30 23 * * *"
@@ -23,6 +30,11 @@ on:
         default: "smoke"
         type: choice
         options: [smoke, web, android, ios, mobile, all]
+      schedule_slot:
+        description: "Scheduler slot (UTC ISO; leave empty for a manual run)"
+        required: false
+        default: ""
+        type: string
       base_url:
         description: "Store under test (default: suite default)"
         required: false
@@ -30,15 +42,44 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write # Atomic identity lease refs; no administration or secret permissions.
 
-concurrency:
-  group: ordering-e2e-suite
-  cancel-in-progress: false
-  queue: max
-
 jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      admitted: ${{ steps.claim.outputs.admitted }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Admit one execution per scheduled slot
+        id: claim
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_SCHEDULE_KIND: smoke
+        run: node scripts/admit-schedule.js
+      - name: Preserve execution admission receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schedule-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .schedule/admission.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   e2e:
+    needs: admission
+    if: needs.admission.outputs.admitted == 'true'
+    concurrency:
+      group: ordering-e2e-suite
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble

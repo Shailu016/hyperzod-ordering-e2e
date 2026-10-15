@@ -264,7 +264,9 @@ def main():
         summary = {"status": "infrastructure-failed", "error": "Report is missing or belongs to another run; open workflow evidence"}
     if context.get("E2E_JOB_STATUS") in ("failure", "cancelled", "timed_out") and summary.get("status") == "passed":
         summary = dict(summary, status="infrastructure-failed", error="Workflow infrastructure failed after tests")
-    if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success':
+    if context.get('E2E_EXECUTION_BLOCKED') == 'true':
+        summary = dict(summary, status='infrastructure-failed', error='Scheduled execution could not be admitted; inspect the source workflow admission job')
+    elif context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success':
         summary = dict(summary, status='infrastructure-failed', error='Report publishing failed; inspect the source GitHub run and any available artifacts')
     try:
         payload = build_payload(summary, context)

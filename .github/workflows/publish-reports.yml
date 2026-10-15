@@ -41,8 +41,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scripts/report_source.py
+      - name: Download source execution receipt
+        if: steps.source.outputs.admission == 'slots-v1' && steps.source.outputs.delivery == 'pages-v1'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: schedule-admission-${{ steps.source.outputs.id }}-${{ steps.source.outputs.attempt }}
+          path: .report-publication/admission
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.source.outputs.id }}
+      - name: Verify execution or suppress duplicate slot
+        id: admission
+        if: always() && steps.source.outputs.admission == 'slots-v1' && steps.source.outputs.delivery == 'pages-v1'
+        run: python scripts/report_admission.py --source .report-publication/source-run.json --receipt .report-publication/admission/admission.json
       - name: Download source evidence
-        if: steps.source.outputs.delivery == 'pages-v1'
+        if: steps.source.outputs.delivery == 'pages-v1' && steps.admission.outputs.publish != 'false' && steps.admission.outputs.blocked != 'true'
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -51,7 +64,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.source.outputs.id }}
       - name: Prepare public report bundle
-        if: always() && steps.source.outputs.delivery == 'pages-v1'
+        if: always() && steps.source.outputs.delivery == 'pages-v1' && steps.admission.outputs.publish != 'false' && steps.admission.outputs.blocked != 'true'
         id: prepare
         run: python scripts/report_site.py prepare --input .report-publication/incoming --output .report-publication/prepared --source .report-publication/source-run.json
       - name: Retain generated report bundle outside Git
@@ -98,9 +111,10 @@ jobs:
           REPORT_BASE_URL: ${{ steps.deployment.outputs.page_url }}
         run: python scripts/verify_report.py --base-url "$REPORT_BASE_URL" --publication .report-publication/prepared/publication.json
       - name: Send one Slack outcome with verified evidence
-        if: always() && steps.source.outputs.delivery == 'pages-v1'
+        if: always() && steps.source.outputs.delivery == 'pages-v1' && steps.admission.outputs.publish != 'false'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          E2E_EXECUTION_BLOCKED: ${{ steps.admission.outputs.blocked }}
           E2E_REPORT_PUBLISHER: 'true'
           E2E_SOURCE_RUN_ID: ${{ steps.source.outputs.id }}
           E2E_SOURCE_RUN_NUMBER: ${{ steps.source.outputs.number }}
