@@ -45,6 +45,15 @@ def validate_summary(summary):
             raise ValueError('Invalid device outcome')
     if not isinstance(summary.get('issues', []), list) or not all(isinstance(issue, str) for issue in summary.get('issues', [])):
         raise ValueError('Invalid run issues')
+    if 'reportType' in summary:
+        if summary['reportType'] != 'schedule-monitor' or summary['status'] != 'infrastructure-failed' or summary.get('counts') or summary.get('projects') or not summary.get('issues'):
+            raise ValueError('Invalid schedule alert')
+        try:
+            checked = datetime.fromisoformat(summary['checkedAt'].replace('Z', '+00:00'))
+            if checked.tzinfo is None:
+                raise ValueError('Missing schedule check timezone')
+        except (KeyError, AttributeError, ValueError):
+            raise ValueError('Invalid schedule check time') from None
     if not isinstance(summary.get('failedTests', []), list) or not all(isinstance(item, dict) for item in summary.get('failedTests', [])):
         raise ValueError('Invalid failure evidence')
     if summary['status'] == 'passed':
@@ -66,8 +75,11 @@ def build_payload(summary, context):
     number = context.get("GITHUB_RUN_NUMBER", "")
     icon = "✅" if status == "passed" else "⚠️" if status in ("running", "infrastructure-failed") else "❌"
     run_label = f'#{number}' if number else 'Local run'
-    heading = f"{icon} Ordering {label} · {run_label} · {status.replace('-', ' ').title()}"
+    schedule_monitor = summary.get('reportType') == 'schedule-monitor'
+    heading = f"{icon} Ordering {label} · {run_label} · {'Schedule Alert' if schedule_monitor else status.replace('-', ' ').title()}"
     detail = " · ".join(f"{counts.get(key, 0)} {name}" for key, name in (("passed", "passed"), ("failed", "failed"), ("skipped", "skipped"), ("flaky", "flaky"), ("notRun", "not run"))) if counts else "No complete test report available"
+    if schedule_monitor:
+        detail = 'Scheduled execution is missing, delayed or interrupted. Check the schedule issue below; this monitor does not report a storefront test failure.'
     repository = context.get("GITHUB_REPOSITORY", "")
     run_id = context.get("GITHUB_RUN_ID", "")
     url = f"https://github.com/{repository}/actions/runs/{run_id}" if re.fullmatch(r"[\w.-]+/[\w.-]+", repository) and str(run_id).isdigit() else ""
@@ -77,7 +89,7 @@ def build_payload(summary, context):
     if summary.get('leaseRetainedReason'):
         issues.append('Account lock retained: ' + summary['leaseRetainedReason'])
     blocks = [{"type": "header", "text": {"type": "plain_text", "text": clean(heading, 140), "emoji": True}},
-              {"type": "section", "text": {"type": "mrkdwn", "text": "*Results*\n" + detail}}]
+              {"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule status*\n" if schedule_monitor else "*Results*\n") + detail}}]
     projects = summary.get("projects", [])
     if projects:
         rows = []
@@ -96,7 +108,7 @@ def build_payload(summary, context):
             lines.append(f"…and {len(failures) - 4} more; open evidence below")
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Failures*\n" + "\n".join(lines)}})
     if issues:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Run issues*\n" + "\n".join("• " + clean(issue, 220) for issue in issues[:5])}})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule issues*\n" if schedule_monitor else "*Run issues*\n") + "\n".join("• " + clean(issue, 400 if schedule_monitor else 220) for issue in issues[:5])}})
     timing = []
     try:
         start = datetime.fromisoformat(summary["startedAt"].replace("Z", "+00:00"))
@@ -105,6 +117,9 @@ def build_payload(summary, context):
         timing = [f"Duration {seconds // 60}m {seconds % 60}s", finish.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y · %I:%M %p IST")]
     except (KeyError, ValueError, TypeError):
         pass
+    if schedule_monitor:
+        checked = datetime.fromisoformat(summary['checkedAt'].replace('Z', '+00:00'))
+        timing.append(checked.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime('Checked %d %b %Y · %I:%M %p IST'))
     branch = context.get("GITHUB_REF_NAME", "")
     sha = context.get("GITHUB_SHA", "")[:7]
     if branch:
@@ -113,7 +128,7 @@ def build_payload(summary, context):
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " | ".join(timing)}]})
     buttons = []
     if url:
-        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Run & evidence"}, "url": url})
+        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Monitor details" if schedule_monitor else "Run & evidence"}, "url": url})
     origin = http_url(summary.get("origin", context.get("BASE_URL", "")))
     if origin:
         buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Open test store"}, "url": origin})
