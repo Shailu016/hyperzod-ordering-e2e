@@ -114,6 +114,10 @@ test('public reports preserve native reports, screenshots, playable videos and S
         await page.goto(base + '/runs/123-1/' + failure.path, { waitUntil: 'domcontentloaded' });
         await page.locator('img').waitFor();
         await page.waitForFunction(() => document.querySelector('img').naturalWidth > 0);
+        // Exercise the visible player with a user gesture. WebKit may suspend
+        // playback when a muted video remains below the screenshot/off screen.
+        await page.locator('video').scrollIntoViewIfNeeded();
+        await page.locator('video').click({ position: { x: 5, y: 5 } });
         // Windows WebKit also stalls on the original raw WebM. Verify its
         // explicit download fallback; Chromium and Linux WebKit must play it.
         if (!(process.platform === 'win32' && engine === webkit)) {
@@ -128,7 +132,7 @@ test('public reports preserve native reports, screenshots, playable videos and S
             };
             const timer = setTimeout(() => {
               cleanup();
-              reject(new Error('No decoded playback progress: ' + JSON.stringify({ state: video.readyState, time: video.currentTime, duration: video.duration, ended: video.ended, error: video.error?.message })));
+              reject(new Error('No decoded playback progress: ' + JSON.stringify({ state: video.readyState, time: video.currentTime, duration: video.duration, paused: video.paused, ended: video.ended, visibility: document.visibilityState, error: video.error?.message })));
             }, 8000);
             // Observe progress before play: a short recording can finish before
             // a later polling assertion begins in WebKit.
