@@ -1,6 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { mostRecentDue, assessSchedule, notificationPlan } = require('../scripts/check-schedule');
+
+test('invalid monitor timestamps fail visibly instead of generating misleading alerts', () => {
+  const base = { crons: ['30 7 * * *'], now: new Date('2026-10-15T10:00:00Z'), enabledAt: '2026-10-15T00:00:00Z', runs: [] };
+  for (const change of [{ now: 'invalid' }, { enabledAt: 'invalid' }, { scheduledDue: 'invalid' }, { graceMinutes: -1 }]) {
+    assert.throws(() => assessSchedule({ ...base, ...change }));
+  }
+});
 test('UTC schedule converts to the correct 1 PM IST instant', () => {
   assert.equal(mostRecentDue(['30 7 * * *'], new Date('2026-10-06T09:00:00Z')).toISOString(), '2026-10-06T07:30:00.000Z');
 });
@@ -63,4 +70,14 @@ test('freshness grace, rollout and completed runs suppress unnecessary alerts', 
   assert.equal(assessSchedule({ ...base, now: new Date('2026-10-06T07:35:00Z') }), null);
   assert.equal(assessSchedule({ ...base, enabledAt: '2026-10-06T08:00:00Z' }), null);
   assert.equal(assessSchedule({ ...base, runs: [{ event: 'schedule', created_at: '2026-10-06T07:40:00Z', status: 'completed', conclusion: 'success' }] }), null);
+});
+
+test('a recovered slot uses its actual owner and never confuses a duplicate success with execution', () => {
+  const due = '2026-10-15T07:30:00.000Z';
+  const base = { kind: 'smoke', scheduledDue: due, crons: ['30 7 * * *'], now: new Date('2026-10-15T10:00:00Z'), enabledAt: '2026-10-15T00:00:00Z' };
+  const run = { id: 17, event: 'workflow_dispatch', head_branch: 'main', display_title: 'Ordering smoke · slot ' + due, created_at: '2026-10-15T07:35:00Z', status: 'completed', conclusion: 'success' };
+  assert.equal(assessSchedule({ ...base, owned: true, runs: [run] }), null);
+  assert.equal(assessSchedule({ ...base, runs: [run] }).reason, 'not-admitted');
+  assert.equal(assessSchedule({ ...base, runs: [{ ...run, display_title: 'Ordering smoke · manual' }] }).reason, 'missing');
+  assert.equal(assessSchedule({ ...base, owned: true, runs: [{ ...run, conclusion: 'failure' }] }), null);
 });

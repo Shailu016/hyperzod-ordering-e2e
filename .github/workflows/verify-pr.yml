@@ -22,6 +22,10 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run lint
       - run: npm run test:unit
+      - name: Build independent scheduler without deploying or dispatching
+        run: |
+          npm ci --prefix scheduler --ignore-scripts --no-audit --no-fund
+          npm --prefix scheduler run check
       - name: Install browsers for loopback diagnostic checks
         run: npx playwright install --with-deps chromium webkit
       - run: npm run test:diagnostics:browser

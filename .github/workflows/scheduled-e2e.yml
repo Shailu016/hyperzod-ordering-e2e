@@ -1,23 +1,19 @@
-# Scheduled E2E runs (free tier friendly).
-#
-# WHAT: runs this suite automatically at fixed intervals against
-# https://automations-store.hyperzod.me/ (or BASE_URL override).
-# WHY GITHUB ACTIONS: public repos get unlimited free minutes; private repos
-# get 2,000 min/month. Bitbucket's free tier is only ~50 min/month, and one
-# full matrix here costs ~35 min - so GitHub scheduling is the free answer.
-# (Bitbucket alternative: repo Settings -> Pipelines -> Schedules on the
-# custom e2e-web / e2e-mobile pipelines - same suite, paid minutes.)
-#
-# SAFETY: `concurrency` below guarantees runs never overlap. Overlapping runs
-# share one TEST_USER_EMAIL/cart and will clobber each other's sessions.
-# Do NOT add a matrix that runs projects in parallel.
+# Full daily suite, with native cron fallback and independent slot recovery.
+# Admission claims the slot before the shared account queue. Keep devices serial.
 
 name: scheduled-e2e-full
+
+run-name: >-
+  ${{ inputs.schedule_slot && format('Ordering full · slot {0}', inputs.schedule_slot) ||
+      (github.event_name == 'schedule' && format('Ordering full · native {0}', github.event.schedule) || 'Ordering full · manual') }}
+
+env:
+  E2E_SCHEDULE_PROTOCOL: slots-v1
 
 on:
   schedule:
     # Full matrix 1x daily: 6:00 PM IST = 12:30 UTC.
-    # (5 AM / 1 PM / 1 AM IST run smoke via scheduled-e2e-smoke.yml.)
+    # (1 AM / 3 AM / 5 AM / 1 PM IST run smoke via scheduled-e2e-smoke.yml.)
     - cron: "30 12 * * *"
   workflow_dispatch:
     inputs:
@@ -27,6 +23,11 @@ on:
         default: "all"
         type: choice
         options: [smoke, web, android, ios, mobile, all]
+      schedule_slot:
+        description: "Scheduler slot (UTC ISO; leave empty for a manual run)"
+        required: false
+        default: ""
+        type: string
       base_url:
         description: "Store under test (default: suite default)"
         required: false
@@ -34,17 +35,44 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write # Atomic identity lease refs; no administration or secret permissions.
 
-concurrency:
-  # One group across BOTH workflow files: smoke and full runs share one
-  # test user/cart and must never overlap, however they were triggered.
-  group: ordering-e2e-suite
-  cancel-in-progress: false
-  queue: max
-
 jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      admitted: ${{ steps.claim.outputs.admitted }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Admit one execution per scheduled slot
+        id: claim
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_SCHEDULE_KIND: full
+        run: node scripts/admit-schedule.js
+      - name: Preserve execution admission receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schedule-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .schedule/admission.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   e2e:
+    needs: admission
+    if: needs.admission.outputs.admitted == 'true'
+    concurrency:
+      group: ordering-e2e-suite
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble

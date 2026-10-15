@@ -1,32 +1,25 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-function mostRecentDue(crons, now) {
-  if (!Array.isArray(crons) || !crons.length || !Number.isFinite(Number(new Date(now)))) throw new Error('Missing or invalid schedule configuration');
-  const dates = [];
-  for (const cron of crons) {
-    const match = /^(\d+) (\d+) \* \* \*$/.exec(cron);
-    if (!match || Number(match[1]) > 59 || Number(match[2]) > 23) throw new Error('Freshness monitor supports valid daily UTC schedules only');
-    const date = new Date(now);
-    date.setUTCHours(Number(match[2]), Number(match[1]), 0, 0);
-    if (date > now) date.setUTCDate(date.getUTCDate() - 1);
-    dates.push(date);
-  }
-  return new Date(Math.max(...dates.map(Number)));
-}
-function assessSchedule({ crons, now, enabledAt, runs, graceMinutes = 45 }) {
-  const due = mostRecentDue(crons, now);
-  if (due < new Date(enabledAt) || Number(now) - Number(due) < graceMinutes * 60_000) return null;
-  const matching = runs.filter((r) => r.event === 'schedule' && new Date(r.created_at) >= due && new Date(r.created_at) <= now);
+const { SCHEDULES, timestamp, mostRecentDue, recentSlots, runMatchesSlot } = require('../utils/schedule');
+const { readClaim } = require('../utils/schedule-claims');
+const { githubAPI, workflowRuns } = require('../utils/schedule-api');
+function assessSchedule({ crons, now, enabledAt, runs, graceMinutes = 45, kind, scheduledDue, owned = false }) {
+  now = timestamp(now);
+  enabledAt = timestamp(enabledAt);
+  const due = scheduledDue ? timestamp(scheduledDue) : mostRecentDue(crons, now);
+  if (!Number.isFinite(graceMinutes) || graceMinutes < 0) throw new Error('Invalid schedule grace period');
+  if (due < enabledAt || Number(now) - Number(due) < graceMinutes * 60_000) return null;
+  const matching = kind ? runs.filter((r) => (owned || runMatchesSlot(r, kind, due.toISOString())) && new Date(r.created_at) <= now) : runs.filter((r) => r.event === 'schedule' && new Date(r.created_at) >= due && new Date(r.created_at) <= now);
   // Execution freshness does not assess test success. Completed failures have
   // their own E2E result notification; do not report them again as missing runs.
-  if (matching.some((r) => r.status === 'completed' && ['success', 'failure', 'neutral'].includes(r.conclusion))) return null;
+  if ((!kind || owned) && matching.some((r) => r.status === 'completed' && ['success', 'failure', 'neutral'].includes(r.conclusion))) return null;
   const run = matching.sort((a,b) => Number(new Date(b.created_at)) - Number(new Date(a.created_at)))[0];
   if (run && run.status !== 'completed' && Number(now) - Number(new Date(run.created_at)) < 100 * 60_000) return null;
-  const reason = !run ? 'missing' : run.status !== 'completed' ? 'overdue' : run.conclusion || 'incomplete';
+  const reason = !run ? 'missing' : run.status !== 'completed' ? 'overdue' : kind && !owned ? 'not-admitted' : run.conclusion || 'incomplete';
   const time = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(due);
   return { status: 'infrastructure-failed', suite: 'schedule freshness', reason,
-    issues: [`Scheduled for ${time} IST: ${reason === 'missing' ? 'GitHub has not created a scheduled run yet (delayed or dropped trigger)' : `execution is ${reason}`}. This is a schedule alert, not a storefront test result.`],
+    issues: [`Scheduled for ${time} IST: ${reason === 'missing' ? 'GitHub has not created a scheduled run yet (delayed or dropped trigger)' : reason === 'not-admitted' ? 'the run finished without acquiring permission to execute this scheduled slot; inspect its admission job' : `execution is ${reason}`}. This is a schedule alert, not a storefront test result.`],
     due: due.toISOString(), runId: run?.id };
 }
 function notificationPlan(incidents, previous = {}, now = new Date()) {
@@ -52,19 +45,25 @@ async function main() {
     return;
   }
   const repository = process.env.GITHUB_REPOSITORY || 'Shailu016/hyperzod-ordering-e2e';
-  const get = async (url) => {
-    const response = await fetch(`https://api.github.com/repos/${repository}/${url}`, { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) throw new Error(`Schedule inspection failed: HTTP ${response.status}`);
-    return response.json();
-  };
+  const api = githubAPI({ repository, token: process.env.GITHUB_TOKEN });
   const incidents = [];
-  for (const file of ['scheduled-e2e-smoke.yml', 'scheduled-e2e.yml']) {
-    const source = fs.readFileSync(path.join('.github/workflows', file), 'utf8');
-    const crons = [...source.matchAll(/cron:\s*"([^"]+)"/g)].map((m) => m[1]);
-    const commits = await get(`commits?path=.github/workflows/${file}&per_page=1`);
-    const history = await get(`actions/workflows/${file}/runs?event=schedule&per_page=30`);
-    const incident = assessSchedule({ crons, now: new Date(), enabledAt: commits[0].commit.committer.date, runs: history.workflow_runs });
-    if (incident) incidents.push({ ...incident, file });
+  const now = new Date();
+  for (const [kind, config] of Object.entries(SCHEDULES)) {
+    const commits = await api(`commits?path=.github/workflows/${config.workflow}&per_page=1`);
+    const enabledAt = timestamp(process.env.E2E_SCHEDULE_ENABLED_AT || commits[0].commit.committer.date);
+    const history = await workflowRuns(api, config.workflow, new Date(Number(now) - 24 * 60 * 60_000));
+    for (const due of recentSlots(config.crons, now, 24 * 60 * 60_000)) {
+      if (new Date(due) < new Date(enabledAt) || Number(now) - Date.parse(due) < 45 * 60_000) continue;
+      const claim = await readClaim(api, kind, due);
+      let runs = history;
+      if (claim) {
+        const owner = await api(`actions/runs/${claim.runId}`);
+        if (owner.head_branch !== 'main' || owner.head_sha !== claim.sha || owner.name !== (kind === 'smoke' ? 'scheduled-e2e-smoke' : 'scheduled-e2e-full')) throw new Error('Schedule claim has no verifiable workflow owner');
+        runs = [owner];
+      }
+      const incident = assessSchedule({ crons: config.crons, now, enabledAt, runs, kind, scheduledDue: due, owned: Boolean(claim) });
+      if (incident) incidents.push({ ...incident, file: config.workflow });
+    }
   }
   const previous = fs.existsSync('.monitor/state.json') ? JSON.parse(fs.readFileSync('.monitor/state.json', 'utf8')) : {};
   const plan = notificationPlan(incidents, previous);

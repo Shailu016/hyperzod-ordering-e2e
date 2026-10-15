@@ -32,10 +32,11 @@ def main():
     response = subprocess.run(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/contents/.github/workflows/{file}?ref={source["head_sha"]}'], capture_output=True, check=True)
     contents = base64.b64decode(json.loads(response.stdout)['content']).decode('utf-8')
     delivery = delivery_mode(contents)
+    admission = 'slots-v1' if re.search(r'^\s*E2E_SCHEDULE_PROTOCOL: slots-v1\s*$', contents, re.MULTILINE) else 'legacy'
     Path('.report-publication').mkdir(exist_ok=True)
     Path('.report-publication/source-run.json').write_text(json.dumps(source), encoding='utf-8')
     with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-        output.write(f'id={source["id"]}\nattempt={source["run_attempt"]}\nnumber={source["run_number"]}\nsha={source["head_sha"]}\nartifact={artifact}\nconclusion={source["conclusion"]}\ndelivery={delivery}\n')
+        output.write(f'id={source["id"]}\nattempt={source["run_attempt"]}\nnumber={source["run_number"]}\nsha={source["head_sha"]}\nartifact={artifact}\nconclusion={source["conclusion"]}\ndelivery={delivery}\nadmission={admission}\n')
 
 
 if __name__ == '__main__':

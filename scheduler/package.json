@@ -1,0 +1,11 @@
+{
+  "name": "ordering-e2e-independent-scheduler",
+  "private": true,
+  "scripts": {
+    "check": "wrangler deploy --dry-run --outdir .build",
+    "configure": "node configure.cjs",
+    "deploy": "wrangler deploy --config ../.schedule/worker.production.json",
+    "tail": "wrangler tail --config ../.schedule/worker.production.json"
+  },
+  "devDependencies": { "wrangler": "4.151.0" }
+}

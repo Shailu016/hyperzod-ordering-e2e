@@ -26,6 +26,7 @@ jobs:
         id: freshness
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_SCHEDULE_ENABLED_AT: ${{ vars.E2E_SCHEDULE_ENABLED_AT }}
         run: node scripts/check-schedule.js
       - name: Notify only on a new actionable incident
         if: steps.freshness.outputs.notify == 'true'

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const YAML = require('yaml');
+const { SCHEDULES } = require('../utils/schedule');
 const root = path.resolve(__dirname, '..');
 const load = (file) => YAML.parse(fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8'));
 
@@ -21,6 +22,27 @@ test('source workflows retain evidence for the exact attempt and delegate notifi
     assert.match(evidence.with.name, /github\.run_attempt/);
     assert.match(evidence.with['retention-days'], /retention\.outputs\.days/);
   }
+});
+
+test('both clocks share slot identity and admission runs before the shared test queue', () => {
+  for (const [kind, config] of Object.entries(SCHEDULES)) {
+    const workflow = load(config.workflow);
+    assert.deepEqual(workflow.on.schedule.map((item) => item.cron).sort(), [...config.crons].sort());
+    assert.equal(workflow.env.E2E_SCHEDULE_PROTOCOL, 'slots-v1');
+    assert.ok(workflow.on.workflow_dispatch.inputs.schedule_slot);
+    assert.match(workflow['run-name'], /inputs\.schedule_slot/);
+    assert.equal(workflow.jobs.admission.steps.find((step) => step.id === 'claim').env.E2E_SCHEDULE_KIND, kind);
+    assert.equal(workflow.jobs.e2e.needs, 'admission');
+    assert.match(workflow.jobs.e2e.if, /admission\.outputs\.admitted == 'true'/);
+    assert.equal(workflow.jobs.e2e.concurrency.group, 'ordering-e2e-suite');
+    assert.equal(workflow.concurrency, undefined);
+  }
+  const publisher = load('publish-reports.yml');
+  const receipt = publisher.jobs.publish.steps.find((step) => step.id === 'admission');
+  assert.match(receipt.run, /report_admission\.py/);
+  const notification = publisher.jobs.publish.steps.find((step) => step.run?.includes('notify-slack.py'));
+  assert.match(notification.if, /admission\.outputs\.publish != 'false'/);
+  assert.equal(notification.env.E2E_EXECUTION_BLOCKED, '${{ steps.admission.outputs.blocked }}');
 });
 
 test('privileged publisher executes trusted main code and verifies before sending links', () => {

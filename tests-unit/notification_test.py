@@ -3,6 +3,8 @@ import pathlib
 import unittest
 import urllib.error
 import json
+import io
+import contextlib
 from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location("notifier", pathlib.Path(__file__).parents[1] / "scripts" / "notify-slack.py")
@@ -11,6 +13,18 @@ spec.loader.exec_module(notifier)
 
 
 class NotificationTests(unittest.TestCase):
+    def test_admission_failure_reports_the_source_job_without_posting(self):
+        environment = {'DRY_RUN': '1', 'E2E_REPORT_PUBLISHER': 'true', 'E2E_SOURCE_RUN_ID': '123', 'E2E_SOURCE_RUN_ATTEMPT': '1', 'E2E_EXECUTION_BLOCKED': 'true', 'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e'}
+        with patch.dict(notifier.os.environ, environment, clear=True), patch.object(notifier.sys, 'argv', ['notify', 'missing.json']), patch('builtins.open', side_effect=FileNotFoundError), patch.object(notifier, 'deliver') as send:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                self.assertEqual(notifier.main(), 0)
+            rendered = json.dumps(json.loads(buffer.getvalue()))
+            self.assertIn('Scheduled execution could not be admitted', rendered)
+            self.assertIn('actions/runs/123', rendered)
+            self.assertNotIn('Report publishing failed', rendered)
+            send.assert_not_called()
+
     def test_schedule_alert_has_no_test_failure_heading_or_missing_report_claim(self):
         summary = {'status': 'infrastructure-failed', 'reportType': 'schedule-monitor', 'suite': 'schedule freshness',
                    'checkedAt': '2026-10-14T14:49:07Z', 'issues': ['Full suite scheduled for 6 PM IST: GitHub has not created a run yet.']}
