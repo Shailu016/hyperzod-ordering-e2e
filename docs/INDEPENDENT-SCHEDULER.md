@@ -7,8 +7,14 @@ GitHub remains responsible for runners and the existing report publisher.
 
 ## Execution and duplicate prevention
 
-Smoke runs at **1 AM, 3 AM, 5 AM and 1 PM IST**; full web/Android/iOS emulation
-runs at **6 PM IST**. `utils/schedule.js` defines the UTC schedule shared by
+Full web/Android/iOS emulation runs at **1 AM, 3 AM, 5 AM, 1 PM and 6 PM IST**.
+The four former smoke slots now run the same complete `all` suite. Their legacy
+workflow names/paths, receipt kinds and slot tags remain unchanged to preserve
+ownership and prevent replays during migration. The Worker recognizes both old
+smoke titles and new full titles; an old Worker dispatch is also upgraded to full
+coverage by the workflow. Ordinary manual runs may still select a smaller suite.
+
+`utils/schedule.js` defines the UTC schedule shared by
 the worker, workflow admission and freshness monitor. Workflow contract tests
 reject mismatched cron definitions.
 

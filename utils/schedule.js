@@ -1,7 +1,7 @@
 // Shared by the independent clock, workflow admission and freshness monitor.
 // Keep this module free of Node-only imports so Wrangler can bundle it unchanged.
 const SCHEDULES = Object.freeze({
-  smoke: Object.freeze({ workflow: 'scheduled-e2e-smoke.yml', suite: 'smoke', crons: ['30 19 * * *', '30 21 * * *', '30 23 * * *', '30 7 * * *'] }),
+  smoke: Object.freeze({ workflow: 'scheduled-e2e-smoke.yml', suite: 'all', label: 'full', legacySuites: ['smoke'], crons: ['30 19 * * *', '30 21 * * *', '30 23 * * *', '30 7 * * *'] }),
   full: Object.freeze({ workflow: 'scheduled-e2e.yml', suite: 'all', crons: ['30 12 * * *'] }),
 });
 const MAX_RECOVERY_MS = 6 * 60 * 60_000;
@@ -60,15 +60,17 @@ function slotRef(kind, value) {
 
 function slotTitle(kind, value) {
   validateSlot(kind, value);
-  return `Ordering ${kind} · slot ${value}`;
+  return `Ordering ${SCHEDULES[kind].label || kind} · slot ${value}`;
 }
 
 function runMatchesSlot(run, kind, due) {
   const config = SCHEDULES[kind];
   if (!config || run.head_branch !== 'main') return false;
-  if (run.event === 'workflow_dispatch') return run.display_title === slotTitle(kind, due);
+  const labels = [...new Set([kind, config.label || kind])];
+  // Preserve pre-migration history and slot claims: changing coverage must not replay a completed slot.
+  if (run.event === 'workflow_dispatch') return labels.some(label => run.display_title === `Ordering ${label} · slot ${due}`);
   if (run.event !== 'schedule') return false;
-  const cron = config.crons.find((value) => run.display_title === `Ordering ${kind} · native ${value}`);
+  const cron = config.crons.find((value) => labels.some(label => run.display_title === `Ordering ${label} · native ${value}`));
   return Boolean(cron && mostRecentDue([cron], timestamp(run.created_at)).toISOString() === due);
 }
 
@@ -81,7 +83,7 @@ function admissionSlot({ kind, event, eventSchedule, requestedSlot, suite, baseU
     if (!config.crons.includes(eventSchedule)) throw new Error('Unexpected native schedule');
     due = mostRecentDue([eventSchedule], timestamp(createdAt)).toISOString();
   } else if (event === 'workflow_dispatch') {
-    if (suite !== config.suite || baseUrl) throw new Error('Scheduled recovery cannot override suite or target');
+    if (![config.suite, ...(config.legacySuites || [])].includes(suite) || baseUrl) throw new Error('Scheduled recovery cannot override suite or target');
     due = validateSlot(kind, requestedSlot).toISOString();
   } else throw new Error('Unsupported scheduled event');
   const age = Number(timestamp(now)) - Number(validateSlot(kind, due));
@@ -96,4 +98,14 @@ function recoveryPlan({ kind, now, enabledAt, runs, minimumDelayMs = 2 * 60_000 
   return recentSlots(SCHEDULES[kind].crons, now).filter((due) => timestamp(due) >= enabled && Number(now) - Number(timestamp(due)) >= minimumDelayMs && !runs.some((run) => runMatchesSlot(run, kind, due)));
 }
 
-module.exports = { SCHEDULES, MAX_RECOVERY_MS, CLAIM_RETENTION_MS, timestamp, cronTime, recentSlots, mostRecentDue, validateSlot, slotRef, slotTitle, runMatchesSlot, admissionSlot, recoveryPlan };
+// A scheduled slot always uses its configured coverage, including dispatches from
+// the previous Worker version. Ordinary manual runs keep the selected suite.
+function executionSuite({ kind, event, requestedSlot, requestedSuite }) {
+  const config = SCHEDULES[kind];
+  if (!config || !['schedule', 'workflow_dispatch'].includes(event)) throw new Error('Unknown scheduled execution');
+  if (event === 'schedule' || requestedSlot) return config.suite;
+  if (!['smoke', 'web', 'android', 'ios', 'mobile', 'all'].includes(requestedSuite)) throw new Error('Unknown manual suite');
+  return requestedSuite;
+}
+
+module.exports = { executionSuite, SCHEDULES, MAX_RECOVERY_MS, CLAIM_RETENTION_MS, timestamp, cronTime, recentSlots, mostRecentDue, validateSlot, slotRef, slotTitle, runMatchesSlot, admissionSlot, recoveryPlan };

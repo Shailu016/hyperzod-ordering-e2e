@@ -1,17 +1,13 @@
-# Scheduled smoke runs (free tier friendly) - companion to scheduled-e2e.yml.
-#
-# Smoke 4x daily (times in IST -> cron is UTC):
-#  5:00 AM IST = 23:30 UTC (prev day) | 1:00 PM IST = 07:30 UTC
-#  3:00 AM IST = 21:30 UTC (prev day) | 1:00 AM IST = 19:30 UTC (prev day)
-# The full matrix runs once at 6 PM IST via scheduled-e2e.yml.
-# Same concurrency group as the full workflow: one test user/cart means
-# smoke and full runs must never overlap, however they were triggered.
+# Full web/Android/iOS suite at 1 AM, 3 AM, 5 AM and 1 PM IST.
+# The legacy workflow name/path and slot ownership remain stable so previously
+# completed smoke slots and delayed native triggers cannot execute twice.
+# The 6 PM full run remains in scheduled-e2e.yml. All use the shared account queue.
 
 name: scheduled-e2e-smoke
 
 run-name: >-
-  ${{ inputs.schedule_slot && format('Ordering smoke · slot {0}', inputs.schedule_slot) ||
-      (github.event_name == 'schedule' && format('Ordering smoke · native {0}', github.event.schedule) || 'Ordering smoke · manual') }}
+  ${{ inputs.schedule_slot && format('Ordering full · slot {0}', inputs.schedule_slot) ||
+      (github.event_name == 'schedule' && format('Ordering full · native {0}', github.event.schedule) || format('Ordering {0} · manual', inputs.suite == 'all' && 'full' || inputs.suite)) }}
 
 env:
   E2E_SCHEDULE_PROTOCOL: slots-v1
@@ -27,7 +23,7 @@ on:
       suite:
         description: "Which suite to run"
         required: true
-        default: "smoke"
+        default: "all"
         type: choice
         options: [smoke, web, android, ios, mobile, all]
       schedule_slot:
@@ -83,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       BASE_URL: ${{ inputs.base_url || secrets.E2E_BASE_URL }}
       TEST_USER_FIRST_NAME: ${{ secrets.E2E_USER_FIRST_NAME }}
@@ -111,14 +107,13 @@ jobs:
       - name: Install browsers
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Resolve suite (schedule always runs smoke; manual picks)
+      - name: Resolve suite (scheduled slots always run all devices)
         id: suite
-        run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "name=smoke" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${{ inputs.suite }}" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          E2E_SCHEDULE_KIND: smoke
+          E2E_SCHEDULE_SLOT: ${{ inputs.schedule_slot }}
+          E2E_REQUESTED_SUITE: ${{ inputs.suite }}
+        run: node scripts/resolve-scheduled-suite.js
 
       - name: Run E2E suite
         env:
