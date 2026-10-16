@@ -64,7 +64,7 @@ test('GitHub App JWT is short-lived, signed and limited to this installation rep
   const request = async (url, options) => {
     calls++;
     assert.equal(url, 'https://api.github.com/app/installations/456/access_tokens');
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     assert.deepEqual(JSON.parse(options.body), { repository_ids: [789], permissions: { actions: 'write', contents: 'read' } });
     const jwt = options.headers.Authorization.slice('Bearer '.length);
     const [header, payload, signature] = jwt.split('.');

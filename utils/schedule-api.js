@@ -3,7 +3,7 @@ function githubAPI({ repository, token, request = fetch }) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository || '') || !token) throw new Error('Missing scheduler repository or token');
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'ordering-e2e-scheduler' };
   const send = async (url, method, body) => {
-    const response = await request(url, { method, headers, redirect: 'error', signal: AbortSignal.timeout(15_000), body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await request(url, { method, headers, redirect: 'manual', signal: AbortSignal.timeout(15_000), body: body === undefined ? undefined : JSON.stringify(body) });
     if (!response.ok) throw Object.assign(new Error(`Scheduler API failed (HTTP ${response.status})`), { status: response.status });
     return response.status === 204 ? null : response.json();
   };
@@ -36,4 +36,21 @@ async function workflowRuns(api, workflow, since) {
   throw new Error('Workflow history exceeds the inspection budget; do not dispatch blindly');
 }
 
-module.exports = { githubAPI, workflowRuns };
+// Display names are mutable (and may contain run-name). Resolve the immutable
+// workflow ID from the allowlisted file, then verify both against the source run.
+async function verifyWorkflowRun(api, run, workflow) {
+  if (!['scheduled-e2e-smoke.yml', 'scheduled-e2e.yml'].includes(workflow)) throw new Error('Unknown scheduled workflow');
+  const definition = await api('actions/workflows/' + workflow);
+  const expectedPath = '.github/workflows/' + workflow;
+  if (!Number.isSafeInteger(definition.id) || definition.id <= 0 || definition.path !== expectedPath ||
+      run.workflow_id !== definition.id || run.path !== expectedPath) throw new Error('Scheduled run workflow identity mismatch');
+}
+
+async function readClaimOwner(api, claim, workflow) {
+  const owner = await api(`actions/runs/${claim.runId}/attempts/${claim.attempt}`);
+  if (String(owner.id) !== String(claim.runId) || String(owner.run_attempt) !== String(claim.attempt) || owner.head_branch !== 'main' || owner.head_sha !== claim.sha) throw new Error('Schedule claim has no verifiable workflow owner');
+  await verifyWorkflowRun(api, owner, workflow);
+  return owner;
+}
+
+module.exports = { githubAPI, workflowRuns, verifyWorkflowRun, readClaimOwner };

@@ -306,12 +306,56 @@ class ReportDeliveryTests(unittest.TestCase):
         self.assertEqual(context['GITHUB_RUN_ATTEMPT'], '2')
 
     def test_forks_unknown_workflows_and_incomplete_source_runs_cannot_publish(self):
-        source = {**self.source, 'head_branch': 'main', 'head_repository': {'full_name': 'Owner/Repo'}, 'status': 'completed', 'name': 'scheduled-e2e-smoke'}
+        source = {**self.source, 'head_branch': 'main', 'head_repository': {'full_name': 'Owner/Repo'}, 'status': 'completed', 'name': 'Ordering smoke · native 30 21 * * *', 'workflow_id': 375425965, 'path': '.github/workflows/scheduled-e2e-smoke.yml'}
         _, artifact = report_source.resolve({'workflow_run': source}, 'Owner/Repo')
         self.assertEqual(artifact, 'e2e-smoke-7-attempt-2')
-        for change in [{'head_branch': 'feature'}, {'head_repository': {'full_name': 'Other/Repo'}}, {'name': 'unknown'}, {'status': 'in_progress'}]:
+        for change in [{'head_branch': 'feature'}, {'head_repository': {'full_name': 'Other/Repo'}}, {'path': '.github/workflows/unknown.yml'}, {'status': 'in_progress'}]:
             with self.assertRaises(ValueError):
                 report_source.resolve({'workflow_run': {**source, **change}}, 'Owner/Repo')
+
+    def test_dynamic_titles_use_stable_workflow_paths_and_verified_ids(self):
+        from report_workflow import verify_workflow
+        source = {**self.source, 'head_branch': 'main', 'head_repository': {'full_name': 'Owner/Repo'}, 'status': 'completed',
+                  'name': 'Ordering smoke · native 30 21 * * *', 'path': '.github/workflows/scheduled-e2e-smoke.yml', 'workflow_id': 375425965}
+        for title in ['Ordering smoke · native 30 21 * * *', 'Ordering smoke · manual', 'Ordering smoke · slot 2026-10-16T07:30:00.000Z']:
+            metadata, artifact = report_source.resolve({'workflow_run': {**source, 'name': title}}, 'Owner/Repo')
+            self.assertEqual(metadata['name'], 'scheduled-e2e-smoke')
+            self.assertEqual(artifact, 'e2e-smoke-7-attempt-2')
+            verify_workflow(metadata, {'id': 375425965, 'path': source['path']})
+        for change in [{'id': 999}, {'path': '.github/workflows/evil.yml'}, {'id': '375425965'}]:
+            with self.assertRaises(ValueError):
+                verify_workflow(source, {'id': 375425965, 'path': source['path'], **change})
+        for change in [{'path': '.github/workflows/evil.yml'}, {'workflow_id': '375425965'}, {'workflow_id': 0}, {'path': None}]:
+            with self.assertRaises(ValueError):
+                report_source.resolve({'workflow_run': {**source, **change}}, 'Owner/Repo')
+        full, artifact = report_source.resolve({'workflow_run': {**source, 'name': 'Ordering full · manual', 'path': '.github/workflows/scheduled-e2e.yml', 'workflow_id': 375425968}}, 'Owner/Repo')
+        self.assertEqual(full['name'], 'scheduled-e2e-full')
+        self.assertEqual(artifact, 'e2e-results-7-attempt-2')
+
+    def test_source_cli_verifies_workflow_id_before_writing_publication_outputs(self):
+        source = {**self.source, 'head_branch': 'main', 'head_repository': {'full_name': 'Owner/Repo'}, 'status': 'completed',
+                  'name': 'Ordering smoke · slot 2026-10-16T07:30:00.000Z', 'path': '.github/workflows/scheduled-e2e-smoke.yml', 'workflow_id': 375425965}
+        event_file, output_file = self.root / 'event.json', self.root / 'output'
+        event_file.write_text(json.dumps({'workflow_run': source}), encoding='utf-8')
+        import base64
+        marker = base64.b64encode(b'env:\n  REPORT_DELIVERY: pages-v1\n  E2E_SCHEDULE_PROTOCOL: slots-v1\n').decode()
+        responses = [Mock(stdout=json.dumps({'id': 375425965, 'path': source['path']}).encode()), Mock(stdout=json.dumps({'content': marker}).encode())]
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event_file), 'GITHUB_REPOSITORY': 'Owner/Repo', 'GITHUB_OUTPUT': str(output_file)}), patch.object(report_source.subprocess, 'run', side_effect=responses) as run:
+            previous = Path.cwd()
+            try:
+                os.chdir(self.root)
+                report_source.main()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(run.call_count, 2)
+            self.assertIn('actions/workflows/scheduled-e2e-smoke.yml', run.call_args_list[0].args[0][-1])
+        metadata = json.loads((self.root / '.report-publication/source-run.json').read_text())
+        self.assertEqual(metadata['name'], 'scheduled-e2e-smoke')
+        self.assertIn('artifact=e2e-smoke-7-attempt-2', output_file.read_text())
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event_file), 'GITHUB_REPOSITORY': 'Owner/Repo', 'GITHUB_OUTPUT': str(output_file)}), patch.object(report_source.subprocess, 'run', return_value=Mock(stdout=b'{"id":999,"path":".github/workflows/scheduled-e2e-smoke.yml"}')) as run:
+            with self.assertRaisesRegex(ValueError, 'workflow identity mismatch'):
+                report_source.main()
+            self.assertEqual(run.call_count, 1)
 
 
 if __name__ == '__main__':

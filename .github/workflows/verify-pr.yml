@@ -26,6 +26,7 @@ jobs:
         run: |
           npm ci --prefix scheduler --ignore-scripts --no-audit --no-fund
           npm --prefix scheduler run check
+          npm --prefix scheduler run test:runtime
       - name: Install browsers for loopback diagnostic checks
         run: npx playwright install --with-deps chromium webkit
       - run: npm run test:diagnostics:browser

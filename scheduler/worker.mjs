@@ -21,7 +21,7 @@ export async function appToken(env, { request = fetch, now = new Date(), subtle 
   const unsigned = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + base64url(JSON.stringify({ iss: env.GITHUB_APP_ID, iat: seconds - 60, exp: seconds + 540 }));
   const signature = await subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned));
   const response = await request(`https://api.github.com/app/installations/${env.GITHUB_INSTALLATION_ID}/access_tokens`, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
+    method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15_000),
     headers: { Authorization: 'Bearer ' + unsigned + '.' + base64url(signature), Accept: 'application/vnd.github+json', 'Content-Type': 'application/json', 'User-Agent': 'ordering-e2e-scheduler' },
     body: JSON.stringify({ repository_ids: [Number(env.GITHUB_REPOSITORY_ID)], permissions: { actions: 'write', contents: 'read' } }),
   });
