@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { SCHEDULES, recentSlots, mostRecentDue, admissionSlot, recoveryPlan, slotRef, slotTitle } = require('../utils/schedule');
 const { claimSlot, pruneClaims } = require('../utils/schedule-claims');
-const { githubAPI, workflowRuns } = require('../utils/schedule-api');
+const { githubAPI, workflowRuns, verifyWorkflowRun, readClaimOwner } = require('../utils/schedule-api');
 const { admit } = require('../scripts/admit-schedule');
 
 const due = '2026-10-15T07:30:00.000Z';
@@ -136,8 +136,8 @@ test('claim pruning affects only validated expired scheduler refs and uses compa
 
 test('admission verifies the workflow source identity and rejects non-main scheduled execution', async () => {
   const { api } = fakeClaims();
-  const source = { id: 100, run_attempt: 1, head_sha: sha, name: 'scheduled-e2e-smoke', head_branch: 'main', created_at: '2026-10-15T09:00:00Z' };
-  const combined = (path, ...rest) => path === 'actions/runs/100' ? source : api(path, ...rest);
+  const source = { id: 100, run_attempt: 1, head_sha: sha, name: 'Ordering smoke · slot ' + due, workflow_id: 375425965, path: '.github/workflows/scheduled-e2e-smoke.yml', event: 'workflow_dispatch', head_branch: 'main', created_at: '2026-10-15T09:00:00Z' };
+  const combined = (path, ...rest) => path === 'actions/runs/100' ? source : path === 'actions/workflows/scheduled-e2e-smoke.yml' ? { id: 375425965, path: source.path } : api(path, ...rest);
   const environment = { E2E_SCHEDULE_KIND: 'smoke', GITHUB_RUN_ID: '100', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: sha, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main' };
   const event = { inputs: { suite: 'smoke', schedule_slot: due } };
   const result = await admit({ environment, event, api: combined, now });
@@ -153,9 +153,60 @@ test('scheduler API refuses redirects and never dispatches after incomplete hist
     return { ok: true, json: async () => ({ workflow_runs: [] }) };
   } });
   assert.deepEqual(await workflowRuns(api, 'scheduled-e2e-smoke.yml', now), []);
-  assert.equal(observed[0].options.redirect, 'error');
+  assert.equal(observed[0].options.redirect, 'manual');
   assert.throws(() => api('../escape'));
   let pages = 0;
   await assert.rejects(workflowRuns(async () => { pages++; return { workflow_runs: Array.from({ length: 100 }, () => ({ created_at: now.toISOString() })) }; }, 'scheduled-e2e-smoke.yml', now), /inspection budget/);
   assert.equal(pages, 5);
+});
+
+test('real GitHub dynamic run names never determine execution identity', async () => {
+  const source = { workflow_id: 375425965, path: '.github/workflows/scheduled-e2e-smoke.yml', name: 'Ordering smoke · native 30 21 * * *' };
+  const definition = { id: 375425965, path: source.path };
+  const api = async (route) => { assert.equal(route, 'actions/workflows/scheduled-e2e-smoke.yml'); return definition; };
+  await verifyWorkflowRun(api, source, 'scheduled-e2e-smoke.yml');
+  for (const change of [{ workflow_id: 375425968 }, { path: '.github/workflows/evil.yml' }, { workflow_id: '375425965' }]) {
+    await assert.rejects(verifyWorkflowRun(api, { ...source, ...change }, 'scheduled-e2e-smoke.yml'), /identity mismatch/);
+  }
+  await assert.rejects(verifyWorkflowRun(api, source, '../scheduled-e2e-smoke.yml'), /Unknown scheduled workflow/);
+});
+
+test('manual and native admission accept descriptive titles but reject a spoofed workflow ID', async () => {
+  const environment = { E2E_SCHEDULE_KIND: 'smoke', GITHUB_RUN_ID: '100', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: sha, GITHUB_EVENT_NAME: 'schedule', GITHUB_REF: 'refs/heads/main' };
+  const source = { id: 100, run_attempt: 1, head_sha: sha, name: 'Ordering smoke · native 30 7 * * *', workflow_id: 375425965, path: '.github/workflows/scheduled-e2e-smoke.yml', event: 'schedule', head_branch: 'main', created_at: '2026-10-15T09:00:00Z' };
+  const { api } = fakeClaims();
+  const combined = (route, ...rest) => route === 'actions/runs/100' ? source : route === 'actions/workflows/scheduled-e2e-smoke.yml' ? { id: 375425965, path: source.path } : api(route, ...rest);
+  assert.equal((await admit({ environment, event: { schedule: '30 7 * * *' }, api: combined, now })).status, 'claimed');
+  source.event = 'workflow_dispatch'; source.name = 'Ordering smoke · manual';
+  assert.equal((await admit({ environment: { ...environment, GITHUB_EVENT_NAME: 'workflow_dispatch' }, event: { inputs: {} }, api: combined, now })).status, 'manual');
+  source.workflow_id = 999;
+  await assert.rejects(admit({ environment: { ...environment, GITHUB_EVENT_NAME: 'workflow_dispatch' }, event: { inputs: {} }, api: combined, now }), /identity mismatch/);
+});
+
+test('scheduler API rejects redirect responses without following or retrying them', async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    let calls = 0;
+    const api = githubAPI({ repository: 'Owner/Repo', token: 'fixture-only', request: async (_url, options) => {
+      calls++;
+      assert.equal(options.redirect, 'manual');
+      return { ok: false, status };
+    } });
+    await assert.rejects(api('actions/workflows/scheduled-e2e-smoke.yml/dispatches', 'POST', { ref: 'main' }), /HTTP 30/);
+    assert.equal(calls, 1);
+  }
+});
+
+test('monitor verifies the exact claimed attempt, independent of dynamic titles and later reruns', async () => {
+  const source = { id: 100, run_attempt: 1, head_sha: sha, head_branch: 'main', workflow_id: 375425965, path: '.github/workflows/scheduled-e2e-smoke.yml', name: 'Ordering smoke · native 30 21 * * *' };
+  const api = async route => {
+    if (route === 'actions/runs/100/attempts/1') return source;
+    assert.equal(route, 'actions/workflows/scheduled-e2e-smoke.yml');
+    return { id: 375425965, path: source.path };
+  };
+  assert.equal(await readClaimOwner(api, claim(), 'scheduled-e2e-smoke.yml'), source);
+  for (const [field, value] of [['id', 101], ['run_attempt', 2], ['head_sha', 'b'.repeat(40)], ['head_branch', 'feature']]) {
+    const old = source[field]; source[field] = value;
+    await assert.rejects(readClaimOwner(api, claim(), 'scheduled-e2e-smoke.yml'), /verifiable workflow owner/);
+    source[field] = old;
+  }
 });

@@ -88,12 +88,24 @@ npm run lint
 npm run test:unit
 python -m unittest discover -s tests-unit -p "*_test.py"
 npm --prefix scheduler run check
+npm --prefix scheduler run test:runtime
 ```
 
 Tests cover due times, midnight boundaries, native/recovery races, lost POST
 acknowledgements, conflicting owners, invalid receipts, authentication signatures,
 cutover, expiry, cleanup and publisher suppression. The Wrangler check only bundles
-the worker; it does not deploy or dispatch.
+the worker; it does not deploy or dispatch. The runtime test runs the bundled
+production code in workerd (the Workers runtime), with a generated fixture key and
+all outbound traffic intercepted locally. It checks signed authentication, missing
+slot recovery, duplicate suppression and rejected redirects. No production secrets
+or live GitHub/storefront/Slack requests are used.
+
+GitHub run titles and the API's run name field can change with run-name.
+Admission, claimed-owner checks and report publication instead verify the exact
+allowlisted workflow file and its GitHub workflow ID. Report display labels are
+derived from that verified identity. The monitor reads the claimed attempt rather
+than a newer rerun. HTTP calls use redirect: manual and reject non-success
+responses, keeping credentials at GitHub while remaining compatible with Workers.
 
 Use `npm --prefix scheduler run tail` or Cloudflare Workers Observability to verify
 cron invocations. An enabled tick records only slot/run metadata. Disabled ticks

@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { SCHEDULES, timestamp, mostRecentDue, recentSlots, runMatchesSlot } = require('../utils/schedule');
 const { readClaim } = require('../utils/schedule-claims');
-const { githubAPI, workflowRuns } = require('../utils/schedule-api');
+const { githubAPI, workflowRuns, readClaimOwner } = require('../utils/schedule-api');
 function assessSchedule({ crons, now, enabledAt, runs, graceMinutes = 45, kind, scheduledDue, owned = false }) {
   now = timestamp(now);
   enabledAt = timestamp(enabledAt);
@@ -57,8 +57,7 @@ async function main() {
       const claim = await readClaim(api, kind, due);
       let runs = history;
       if (claim) {
-        const owner = await api(`actions/runs/${claim.runId}`);
-        if (owner.head_branch !== 'main' || owner.head_sha !== claim.sha || owner.name !== (kind === 'smoke' ? 'scheduled-e2e-smoke' : 'scheduled-e2e-full')) throw new Error('Schedule claim has no verifiable workflow owner');
+        const owner = await readClaimOwner(api, claim, config.workflow);
         runs = [owner];
       }
       const incident = assessSchedule({ crons: config.crons, now, enabledAt, runs, kind, scheduledDue: due, owned: Boolean(claim) });

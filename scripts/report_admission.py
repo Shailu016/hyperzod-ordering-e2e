@@ -5,12 +5,11 @@ import os
 import re
 from pathlib import Path
 from datetime import datetime
+from report_workflow import workflow_identity
 
 
 def assess(receipt, source):
-    if source.get('name') not in ('scheduled-e2e-smoke', 'scheduled-e2e-full'):
-        raise ValueError('Unknown scheduled workflow')
-    kind = 'smoke' if source.get('name') == 'scheduled-e2e-smoke' else 'full'
+    kind, _, _ = workflow_identity(source)
     expected = {'protocol': 'slots-v1', 'runId': str(source['id']), 'attempt': str(source['run_attempt']), 'sha': source['head_sha'], 'kind': kind}
     if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
         raise ValueError('Schedule admission belongs to another run, attempt or revision')

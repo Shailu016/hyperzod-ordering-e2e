@@ -1,13 +1,14 @@
 const fs = require('node:fs');
 const { admissionSlot, SCHEDULES } = require('../utils/schedule');
 const { claimSlot, pruneClaims } = require('../utils/schedule-claims');
-const { githubAPI } = require('../utils/schedule-api');
+const { githubAPI, verifyWorkflowRun } = require('../utils/schedule-api');
 
 async function admit({ environment = process.env, event, api, now = new Date() }) {
   const kind = environment.E2E_SCHEDULE_KIND;
   const identity = { protocol: 'slots-v1', runId: String(environment.GITHUB_RUN_ID), attempt: String(environment.GITHUB_RUN_ATTEMPT), sha: environment.GITHUB_SHA, kind };
   const source = await api(`actions/runs/${identity.runId}`);
-  if (String(source.id) !== identity.runId || String(source.run_attempt) !== identity.attempt || source.head_sha !== identity.sha || source.name !== (kind === 'smoke' ? 'scheduled-e2e-smoke' : 'scheduled-e2e-full')) throw new Error('Scheduled run identity mismatch');
+  if (String(source.id) !== identity.runId || String(source.run_attempt) !== identity.attempt || source.head_sha !== identity.sha || source.event !== environment.GITHUB_EVENT_NAME) throw new Error('Scheduled run identity mismatch');
+  await verifyWorkflowRun(api, source, SCHEDULES[kind]?.workflow);
   const slot = admissionSlot({ kind, event: environment.GITHUB_EVENT_NAME, eventSchedule: event.schedule,
     requestedSlot: event.inputs?.schedule_slot, suite: event.inputs?.suite, baseUrl: event.inputs?.base_url,
     createdAt: source.created_at, now });

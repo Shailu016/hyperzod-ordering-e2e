@@ -5,19 +5,21 @@ import re
 import base64
 import subprocess
 from pathlib import Path
+from report_workflow import workflow_identity, verify_workflow
 
 
 def resolve(event, repository):
     source = event['workflow_run']
     if source.get('head_branch') != 'main' or source.get('head_repository', {}).get('full_name') != repository or source.get('status') != 'completed':
         raise ValueError('Only completed runs from this repository main may publish reports')
-    names = {'scheduled-e2e-smoke': 'e2e-smoke-', 'scheduled-e2e-full': 'e2e-results-'}
-    if source.get('name') not in names or not all(str(source.get(field, '')).isdigit() for field in ('id', 'run_number', 'run_attempt')):
+    _, canonical_name, prefix = workflow_identity(source)
+    if not all(str(source.get(field, '')).isdigit() for field in ('id', 'run_number', 'run_attempt')):
         raise ValueError('Unknown report source workflow')
     if not re.fullmatch(r'[a-f0-9]{40}', source.get('head_sha', '')):
         raise ValueError('Invalid report source revision')
-    metadata = {key: source.get(key) for key in ('id', 'run_number', 'run_attempt', 'head_sha', 'head_branch', 'conclusion', 'name', 'html_url')}
-    return metadata, names[source['name']] + str(source['run_number']) + '-attempt-' + str(source['run_attempt'])
+    metadata = {key: source.get(key) for key in ('id', 'run_number', 'run_attempt', 'head_sha', 'head_branch', 'conclusion', 'name', 'html_url', 'path', 'workflow_id')}
+    metadata['name'] = canonical_name
+    return metadata, prefix + str(source['run_number']) + '-attempt-' + str(source['run_attempt'])
 
 
 def delivery_mode(contents):
@@ -28,7 +30,9 @@ def main():
     source, artifact = resolve(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()), os.environ['GITHUB_REPOSITORY'])
     # A run that started before the migration still sends its own webhook.
     # Read its trusted workflow revision to avoid sending a second message.
-    file = 'scheduled-e2e-smoke.yml' if source['name'] == 'scheduled-e2e-smoke' else 'scheduled-e2e.yml'
+    file = source['path'].rsplit('/', 1)[1]
+    definition = subprocess.run(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/workflows/{file}'], capture_output=True, check=True)
+    verify_workflow(source, json.loads(definition.stdout))
     response = subprocess.run(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/contents/.github/workflows/{file}?ref={source["head_sha"]}'], capture_output=True, check=True)
     contents = base64.b64decode(json.loads(response.stdout)['content']).decode('utf-8')
     delivery = delivery_mode(contents)

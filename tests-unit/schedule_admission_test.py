@@ -6,6 +6,8 @@ import json
 import tempfile
 from unittest.mock import patch
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
 
 spec = importlib.util.spec_from_file_location('report_admission', Path(__file__).parents[1] / 'scripts' / 'report_admission.py')
 module = importlib.util.module_from_spec(spec)
@@ -14,7 +16,7 @@ spec.loader.exec_module(module)
 
 class ScheduleAdmissionTests(unittest.TestCase):
     def setUp(self):
-        self.source = {'id': 123, 'run_attempt': 1, 'head_sha': 'a' * 40, 'name': 'scheduled-e2e-smoke'}
+        self.source = {'id': 123, 'run_attempt': 1, 'head_sha': 'a' * 40, 'name': 'Ordering smoke · native 30 21 * * *', 'workflow_id': 375425965, 'path': '.github/workflows/scheduled-e2e-smoke.yml'}
         self.receipt = {'protocol': 'slots-v1', 'runId': '123', 'attempt': '1', 'sha': 'a' * 40, 'kind': 'smoke', 'due': '2026-10-15T07:30:00.000Z', 'ownerRunId': '123', 'ownerAttempt': '1', 'status': 'claimed', 'admitted': True}
 
     def test_real_manual_and_claimed_executions_publish_their_evidence(self):
