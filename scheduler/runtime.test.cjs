@@ -48,7 +48,7 @@ test('production scheduler transport and authentication work in the Workers runt
           if (route.includes('/git/ref/')) return new Response(null, { status: 404 });
           if (route.endsWith('/dispatches')) {
             assert.equal(route, '/repos/Owner/Repo/actions/workflows/scheduled-e2e-smoke.yml/dispatches');
-            assert.deepEqual(await request.json(), { ref: 'main', inputs: { suite: 'smoke', schedule_slot: '2026-10-16T07:30:00.000Z' } });
+            assert.deepEqual(await request.json(), { ref: 'main', inputs: { suite: 'all', schedule_slot: '2026-10-16T07:30:00.000Z' } });
             return new Response(null, { status: 204 });
           }
           throw new Error('Unexpected runtime request: ' + route);

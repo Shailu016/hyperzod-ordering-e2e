@@ -26,14 +26,14 @@ test('independent worker stays inert while disabled and exposes no public dispat
   assert.equal((await worker.fetch(new Request('https://fixture.invalid/dispatch', { method: 'POST' }))).status, 404);
 });
 
-test('worker recovers the missing 1 PM slot using main and the configured smoke suite', async () => {
+test('worker recovers the missing 1 PM slot using main and the full device suite', async () => {
   const { tick } = await load();
   const { api, calls } = fakeAPI();
   const result = await tick(environment, { now, api });
   assert.deepEqual(result.dispatched.map((item) => item.due), [due]);
   const post = calls.find((call) => call.method === 'POST');
   assert.equal(post.path, 'actions/workflows/scheduled-e2e-smoke.yml/dispatches');
-  assert.deepEqual(post.body, { ref: 'main', inputs: { suite: 'smoke', schedule_slot: due } });
+  assert.deepEqual(post.body, { ref: 'main', inputs: { suite: 'all', schedule_slot: due } });
 });
 
 test('worker fails closed before dispatch against old main or invalid cutover', async () => {

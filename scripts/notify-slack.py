@@ -119,6 +119,7 @@ def build_payload(summary, context):
     counts = summary.get("counts", {})
     status = summary.get("status", "infrastructure-failed")
     label = summary.get("suite", context.get("E2E_SUITE_LABEL", "e2e"))
+    label = "full" if label == "all" else label
     number = context.get("GITHUB_RUN_NUMBER", "")
     icon = "✅" if status == "passed" else "⚠️" if status in ("running", "infrastructure-failed") else "❌"
     run_label = f'#{number}' if number else 'Local run'

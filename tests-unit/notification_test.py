@@ -13,6 +13,11 @@ spec.loader.exec_module(notifier)
 
 
 class NotificationTests(unittest.TestCase):
+    def test_full_suite_has_a_clear_slack_label_without_posting(self):
+        payload = notifier.build_payload({'suite': 'all', 'status': 'passed', 'counts': {'passed': 80}}, {})
+        self.assertIn('Ordering full', payload['blocks'][0]['text']['text'])
+        self.assertNotIn('Ordering all', payload['blocks'][0]['text']['text'])
+
     def test_admission_failure_reports_the_source_job_without_posting(self):
         environment = {'DRY_RUN': '1', 'E2E_REPORT_PUBLISHER': 'true', 'E2E_SOURCE_RUN_ID': '123', 'E2E_SOURCE_RUN_ATTEMPT': '1', 'E2E_EXECUTION_BLOCKED': 'true', 'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e'}
         with patch.dict(notifier.os.environ, environment, clear=True), patch.object(notifier.sys, 'argv', ['notify', 'missing.json']), patch('builtins.open', side_effect=FileNotFoundError), patch.object(notifier, 'deliver') as send:

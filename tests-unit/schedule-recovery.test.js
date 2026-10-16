@@ -87,7 +87,7 @@ test('cutover, a two-minute native grace, and six-hour recovery bounds prevent s
 test('scheduled admission validates suite, target, timestamp and event before touching the store', () => {
   const base = { kind: 'smoke', event: 'workflow_dispatch', requestedSlot: due, suite: 'smoke', baseUrl: '', now, createdAt: now };
   assert.deepEqual(admissionSlot(base), { mode: 'scheduled', due });
-  for (const change of [{ suite: 'all' }, { baseUrl: 'https://other.invalid' }, { requestedSlot: '../escape' }, { requestedSlot: '2026-10-15T08:30:00.000Z' }, { now: new Date('2026-10-15T07:00:00Z') }, { event: 'pull_request' }]) {
+  for (const change of [{ suite: 'android' }, { baseUrl: 'https://other.invalid' }, { requestedSlot: '../escape' }, { requestedSlot: '2026-10-15T08:30:00.000Z' }, { now: new Date('2026-10-15T07:00:00Z') }, { event: 'pull_request' }]) {
     assert.throws(() => admissionSlot({ ...base, ...change }));
   }
   assert.equal(admissionSlot({ ...base, now: new Date('2026-10-15T15:00:00Z') }).mode, 'expired');

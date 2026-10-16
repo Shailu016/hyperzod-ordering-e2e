@@ -1,19 +1,19 @@
-# Full daily suite, with native cron fallback and independent slot recovery.
+# Full evening suite, with native cron fallback and independent slot recovery.
 # Admission claims the slot before the shared account queue. Keep devices serial.
 
 name: scheduled-e2e-full
 
 run-name: >-
   ${{ inputs.schedule_slot && format('Ordering full · slot {0}', inputs.schedule_slot) ||
-      (github.event_name == 'schedule' && format('Ordering full · native {0}', github.event.schedule) || 'Ordering full · manual') }}
+      (github.event_name == 'schedule' && format('Ordering full · native {0}', github.event.schedule) || format('Ordering {0} · manual', inputs.suite == 'all' && 'full' || inputs.suite)) }}
 
 env:
   E2E_SCHEDULE_PROTOCOL: slots-v1
 
 on:
   schedule:
-    # Full matrix 1x daily: 6:00 PM IST = 12:30 UTC.
-    # (1 AM / 3 AM / 5 AM / 1 PM IST run smoke via scheduled-e2e-smoke.yml.)
+    # Evening full matrix: 6:00 PM IST = 12:30 UTC.
+    # The other four full runs retain their legacy scheduled-e2e-smoke.yml identity.
     - cron: "30 12 * * *"
   workflow_dispatch:
     inputs:
@@ -104,14 +104,13 @@ jobs:
       - name: Install browsers
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Resolve suite (schedule always runs full; manual picks)
+      - name: Resolve suite (scheduled slots always run all devices)
         id: suite
-        run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "name=all" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${{ inputs.suite }}" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          E2E_SCHEDULE_KIND: full
+          E2E_SCHEDULE_SLOT: ${{ inputs.schedule_slot }}
+          E2E_REQUESTED_SUITE: ${{ inputs.suite }}
+        run: node scripts/resolve-scheduled-suite.js
 
       - name: Run E2E suite
         env:
