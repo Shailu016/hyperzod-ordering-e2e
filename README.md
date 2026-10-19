@@ -44,8 +44,12 @@ When the server reports half or less of its per-minute request allowance remaini
 After a scheduled run completes, the report publisher deploys its Playwright
 reports to GitHub Pages, verifies the exact source run/attempt, then sends the
 existing Slack webhook a summary, failure thumbnails and links to screenshots,
-videos and the full report. Publication errors remain visible with GitHub evidence
-as the fallback. Passing evidence is retained for 3 days; failed evidence for 14.
+videos and the full report. Pages verification retries for up to roughly five minutes,
+with cache-busting probes and safe error reasons. If deployment succeeds but the URL
+is still unavailable, Slack includes a report link marked verification pending and
+a saved-artifact fallback, without unverified thumbnails. Publication errors appear
+separately from test outcomes and never turn a failed or passed test result into a
+reporting infrastructure result. Passing evidence is retained for 3 days; failed evidence for 14.
 Generated reports use Actions storage and Pages deployments; no report files enter Git history.
 Pages evidence is public. See [docs/REPORT-DELIVERY.md](docs/REPORT-DELIVERY.md)
 for setup, retention, exposure, rollout and local previews.

@@ -272,7 +272,8 @@ class ReportDeliveryTests(unittest.TestCase):
             with contextlib.redirect_stdout(buffer):
                 self.assertEqual(notifier.main(), 0)
             payload = json.loads(buffer.getvalue())
-            self.assertIn('Report publishing failed', json.dumps(payload))
+            self.assertIn('Report publishing or verification failed', json.dumps(payload))
+            self.assertNotIn('Infrastructure Failed', json.dumps(payload))
             self.assertNotIn('image_url', json.dumps(payload))
             self.assertIn('actions/runs/123', json.dumps(payload))
             deliver.assert_not_called()

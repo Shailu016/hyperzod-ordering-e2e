@@ -56,6 +56,12 @@ test('privileged publisher executes trusted main code and verifies before sendin
   const notify = job.steps.find((step) => step.run?.includes('notify-slack.py'));
   assert.match(notify.if, /source\.outputs\.delivery == 'pages-v1'/);
   assert.equal(notify.env.E2E_REPORT_PUBLISH_STATUS, '${{ steps.verify.outcome }}');
+  assert.equal(notify.env.E2E_REPORT_DEPLOY_STATUS, '${{ steps.deployment.outcome }}');
+  assert.equal(notify.env.E2E_REPORT_VERIFY_STATUS, '${{ steps.verify.outputs.status }}');
+  assert.equal(notify.env.E2E_REPORT_ARTIFACT_STATUS, '${{ steps.retained.outcome }}');
+  assert.equal(notify.env.E2E_REPORT_ARTIFACT_RUN_ID, '${{ github.run_id }}');
+  assert.equal(job.steps.find(step => step.id === 'verify')['timeout-minutes'], 6);
+  assert.ok(job.steps.find(step => step.id === 'retained').uses.startsWith('actions/upload-artifact@'));
   assert.equal(notify.env.E2E_SOURCE_RUN_ATTEMPT, '${{ steps.source.outputs.attempt }}');
   assert.equal(notify.env.E2E_REPORT_BASE_URL, '${{ steps.deployment.outputs.page_url }}');
   assert.ok(job.steps.findIndex((step) => step.id === 'verify') < job.steps.indexOf(notify));

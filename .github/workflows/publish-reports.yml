@@ -68,6 +68,7 @@ jobs:
         id: prepare
         run: python scripts/report_site.py prepare --input .report-publication/incoming --output .report-publication/prepared --source .report-publication/source-run.json
       - name: Retain generated report bundle outside Git
+        id: retained
         if: steps.prepare.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
@@ -107,6 +108,7 @@ jobs:
       - name: Verify this run and attempt are live
         if: steps.prepare.outcome == 'success' && steps.deployment.outcome == 'success'
         id: verify
+        timeout-minutes: 6
         env:
           REPORT_BASE_URL: ${{ steps.deployment.outputs.page_url }}
         run: python scripts/verify_report.py --base-url "$REPORT_BASE_URL" --publication .report-publication/prepared/publication.json
@@ -125,4 +127,8 @@ jobs:
           E2E_PUBLICATION_FILE: .report-publication/prepared/publication.json
           E2E_REPORT_BASE_URL: ${{ steps.deployment.outputs.page_url }}
           E2E_REPORT_PUBLISH_STATUS: ${{ steps.verify.outcome }}
+          E2E_REPORT_DEPLOY_STATUS: ${{ steps.deployment.outcome }}
+          E2E_REPORT_VERIFY_STATUS: ${{ steps.verify.outputs.status }}
+          E2E_REPORT_ARTIFACT_STATUS: ${{ steps.retained.outcome }}
+          E2E_REPORT_ARTIFACT_RUN_ID: ${{ github.run_id }}
         run: python scripts/notify-slack.py .report-publication/prepared/notification.json
