@@ -39,6 +39,13 @@ Missing cleanup proof or an ambiguous order stops subsequent devices and retains
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.
 When the server reports half or less of its per-minute request allowance remaining, the next scenario waits for the reset (or a full minute when no reset is supplied). This pacing preserves capacity for a complete user journey without hiding API failures. Invalid cooldown evidence stops the next scenario.
 
+A missing Google Places key remains a visible diagnostic. It becomes a recovered
+warning only after a successful Mapbox response for the same query and document,
+selection of one of its valid coordinates, navigation to the store, and matching
+live/persisted location proof. Unrecovered geocoding errors and order/cart/auth
+failures remain critical. Provider tokens and coordinates are excluded from the
+recovery evidence; only fingerprints and sequence proof are retained.
+
 ## Slack reporting
 
 After a scheduled run completes, the report publisher deploys its Playwright

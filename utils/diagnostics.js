@@ -7,6 +7,7 @@ const BACKGROUND = [
   { feature: 'analytics', path: /^\/store\/v1\/search\/analytics\/batch$/, methods: ['POST'] },
   { feature: 'orderForms', path: /^\/store\/v1\/form-builder\/order\/(delivery|pickup|dine_in)$/ },
 ];
+const { recoveredGeocoding } = require('./geocoding-recovery');
 const dependenciesByPage = new WeakMap();
 const recoveredSessions = new WeakSet();
 // These SDK POST endpoints perform searches/validation, never create or change resources.
@@ -27,7 +28,7 @@ function rejection(event, expectedAuthRejection) {
   return expectedAuthRejection && event.method === 'POST' && /^\/auth\/v1\/user\/(login|otp\/verify)$/.test(endpoint(event.url)) &&
     ((event.kind === 'http' && [400, 401, 422].includes(event.status)) || event.kind === 'application');
 }
-/** @param {{events: Array<any>, successfulReads: Record<string, number>, successfulAccountDeletions?: Array<{userId: string, sequence: number}>}} capture @param {{page?: object, dependencies?: string[], expectedAuthRejection?: boolean, expectedMissingPage?: boolean, deletedUserId?: string | number}} [options] */
+/** @param {{events: Array<any>, successfulReads: Record<string, number>, successfulAccountDeletions?: Array<{userId: string, sequence: number}>, geocodingRecoveries?: Array<any>}} capture @param {{page?: object, dependencies?: string[], expectedAuthRejection?: boolean, expectedMissingPage?: boolean, deletedUserId?: string | number}} [options] */
 function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejection = false, expectedMissingPage = false, deletedUserId } = {}) {
   const required = new Set([...dependencies, ...(dependenciesByPage.get(page) || [])]);
   const failures = capture.events.filter((event) => ['http', 'transport', 'application', 'inspection', 'cancelled'].includes(event.kind));
@@ -39,7 +40,7 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
     // changes. Preserve those as warnings; API/script/document failures still
     // require navigation or recovery evidence.
     const discardedImage = event.kind === 'cancelled' && event.method === 'GET' && event.resourceType === 'image';
-    let warning = discardedImage || (event.kind === 'cancelled' && event.navigationDiscarded && isReadRequest(event)) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
+    let warning = recoveredGeocoding(event, capture.geocodingRecoveries) || discardedImage || (event.kind === 'cancelled' && event.navigationDiscarded && isReadRequest(event)) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
     if (expectedMissingPage && event.kind === 'application' && event.method === 'GET' && endpoint(event.url) === '/store/v1/page' && /"Page not found"$/.test(event.message)) warning = true;
     // A later successful response can recover a read, never a cart/order mutation.
     const read = isReadRequest(event);
