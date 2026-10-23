@@ -76,7 +76,7 @@ function runMatchesSlot(run, kind, due) {
   return Boolean(cron && mostRecentDue([cron], timestamp(run.created_at)).toISOString() === due);
 }
 
-function admissionSlot({ kind, event, eventSchedule, requestedSlot, suite, baseUrl, createdAt, now }) {
+function admissionSlot({ kind, event, eventSchedule, requestedSlot, suite, baseUrl, createdAt, now, enabledAt }) {
   const config = SCHEDULES[kind];
   if (!config) throw new Error('Unknown workflow schedule');
   if (event === 'workflow_dispatch' && !requestedSlot) return { mode: 'manual', due: null };
@@ -90,6 +90,7 @@ function admissionSlot({ kind, event, eventSchedule, requestedSlot, suite, baseU
     if (![config.suite, ...(config.legacySuites || [])].includes(suite) || baseUrl) throw new Error('Scheduled recovery cannot override suite or target');
     due = validateSlot(kind, requestedSlot).toISOString();
   } else throw new Error('Unsupported scheduled event');
+  if (enabledAt && timestamp(due) < timestamp(enabledAt)) return { mode: 'expired', due };
   const age = Number(timestamp(now)) - Number(validateSlot(kind, due));
   if (age < 0) throw new Error('A future scheduled slot cannot execute');
   return { mode: age > MAX_RECOVERY_MS ? 'expired' : 'scheduled', due };

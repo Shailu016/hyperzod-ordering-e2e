@@ -11,7 +11,7 @@ async function admit({ environment = process.env, event, api, now = new Date() }
   await verifyWorkflowRun(api, source, SCHEDULES[kind]?.workflow);
   const slot = admissionSlot({ kind, event: environment.GITHUB_EVENT_NAME, eventSchedule: event.schedule,
     requestedSlot: event.inputs?.schedule_slot, suite: event.inputs?.suite, baseUrl: event.inputs?.base_url,
-    createdAt: source.created_at, now });
+    createdAt: source.created_at, now, enabledAt: environment.E2E_SCHEDULE_ENABLED_AT });
   if (slot.mode === 'manual') return { ...identity, status: 'manual', admitted: true, due: null };
   if (source.head_branch !== 'main' || environment.GITHUB_REF !== 'refs/heads/main') throw new Error('Scheduled slots can execute only on main');
   if (slot.mode === 'expired') return { ...identity, due: slot.due, status: 'expired', admitted: false };

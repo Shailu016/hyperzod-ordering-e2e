@@ -48,7 +48,9 @@ For the two-hour cadence rollout, merge both workflow definitions and the shared
 schedule first. Immediately before deploying the updated Worker, record the
 current UTC time and set both the repository variable `E2E_SCHEDULE_ENABLED_AT`
 and the ignored production config's `SCHEDULER_ENABLED_AT` to that same time.
-Keep the existing account, App installation and encrypted key. This starts at
+Admission reads the same repository variable, so a late native trigger cannot
+execute a pre-cutover slot either. Keep the existing account, App installation
+and encrypted key. This starts at
 the next due slot and prevents a burst of historical runs or freshness alerts
 for newly added times. Record the previous cutover in the rollout audit.
 

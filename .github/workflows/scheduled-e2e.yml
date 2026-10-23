@@ -61,6 +61,7 @@ jobs:
         id: claim
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_SCHEDULE_ENABLED_AT: ${{ vars.E2E_SCHEDULE_ENABLED_AT }}
           E2E_SCHEDULE_KIND: full
         run: node scripts/admit-schedule.js
       - name: Preserve execution admission receipt

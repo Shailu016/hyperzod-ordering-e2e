@@ -32,6 +32,7 @@ test('both clocks share slot identity and admission runs before the shared test 
     assert.ok(workflow.on.workflow_dispatch.inputs.schedule_slot);
     assert.match(workflow['run-name'], /inputs\.schedule_slot/);
     assert.equal(workflow.jobs.admission.steps.find((step) => step.id === 'claim').env.E2E_SCHEDULE_KIND, kind);
+    assert.equal(workflow.jobs.admission.steps.find((step) => step.id === 'claim').env.E2E_SCHEDULE_ENABLED_AT, '${{ vars.E2E_SCHEDULE_ENABLED_AT }}');
     assert.equal(workflow.jobs.e2e.needs, 'admission');
     assert.match(workflow.jobs.e2e.if, /admission\.outputs\.admitted == 'true'/);
     assert.equal(workflow.jobs.e2e.concurrency.group, 'ordering-e2e-suite');

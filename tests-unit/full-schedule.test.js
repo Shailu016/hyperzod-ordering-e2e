@@ -120,3 +120,15 @@ test('retired 6 PM cron and dispatch cannot admit a new run', () => {
   assert.deepEqual(admissionSlot({ ...base, event: 'schedule', eventSchedule: '30 12 * * *' }), { mode: 'expired', due: '2026-10-23T12:30:00.000Z' });
   assert.throws(() => admissionSlot({ ...base, event: 'workflow_dispatch', requestedSlot: '2026-10-23T12:30:00.000Z' }), /Slot does not match/);
 });
+
+
+test('both clocks suppress pre-cutover slots while post-cutover and manual runs remain available', () => {
+  const due = '2026-10-23T13:30:00.000Z';
+  const base = { kind: 'full', suite: 'all', now: '2026-10-23T13:35:00.000Z', createdAt: '2026-10-23T13:35:00.000Z' };
+  for (const event of [{ event: 'schedule', eventSchedule: '30 13 * * *' }, { event: 'workflow_dispatch', requestedSlot: due }]) {
+    assert.deepEqual(admissionSlot({ ...base, ...event, enabledAt: '2026-10-23T13:31:00.000Z' }), { mode: 'expired', due });
+    assert.equal(admissionSlot({ ...base, ...event, enabledAt: due }).mode, 'scheduled');
+    assert.throws(() => admissionSlot({ ...base, ...event, enabledAt: 'invalid' }), /Invalid schedule timestamp/);
+  }
+  assert.equal(admissionSlot({ ...base, event: 'workflow_dispatch', enabledAt: '2026-10-23T13:31:00.000Z' }).mode, 'manual');
+});
