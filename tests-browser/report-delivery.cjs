@@ -73,6 +73,11 @@ test('public reports preserve native reports, screenshots, playable videos and S
     const contextFile = path.join(temporary, 'context.json');
     json(contextFile, context);
     execute('scripts/preview-slack.py', path.join(site, 'slack-preview.html'), path.join(input, 'summary.json'), contextFile);
+    const pendingContextFile = path.join(temporary, 'pending-context.json');
+    json(pendingContextFile, { ...context, E2E_REPORT_PUBLISHER: 'true', E2E_REPORT_PUBLISH_STATUS: 'failure',
+      E2E_REPORT_DEPLOY_STATUS: 'success', E2E_REPORT_VERIFY_STATUS: 'pending',
+      E2E_REPORT_ARTIFACT_STATUS: 'success', E2E_REPORT_ARTIFACT_RUN_ID: '888' });
+    execute('scripts/preview-slack.py', path.join(site, 'slack-pending.html'), path.join(input, 'summary.json'), pendingContextFile);
     const mime = { '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.webm': 'video/webm', '.json': 'application/json', '.js': 'text/javascript', '.css': 'text/css' };
     server = http.createServer((request, response) => {
       const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -96,6 +101,8 @@ test('public reports preserve native reports, screenshots, playable videos and S
     // Remap URLs in the local preview only. The real payload retains HTTPS Pages URLs.
     const localPreview = path.join(site, 'slack-preview.html');
     fs.writeFileSync(localPreview, fs.readFileSync(localPreview, 'utf8').replaceAll('https://reports.example.invalid', base));
+    const pendingPreview = path.join(site, 'slack-pending.html');
+    fs.writeFileSync(pendingPreview, fs.readFileSync(pendingPreview, 'utf8').replaceAll('https://reports.example.invalid', base));
     for (const engine of [chromium, webkit]) {
       const browser = await engine.launch();
       browsers.push(browser);
@@ -165,6 +172,13 @@ test('public reports preserve native reports, screenshots, playable videos and S
         await page.screenshot({ path: path.join(preview, 'failure-page.png'), fullPage: true });
         fs.cpSync(site, path.join(preview, 'site'), { recursive: true });
       }
+      await page.goto(base + '/slack-pending.html');
+      assert.equal(await page.getByRole('link', { name: 'Open report (verification pending)', exact: true }).count(), 1);
+      assert.equal(await page.getByRole('link', { name: 'Saved report & media', exact: true }).getAttribute('href'), 'https://github.com/Shailu016/hyperzod-ordering-e2e/actions/runs/888#artifacts');
+      assert.equal(await page.locator('img').count(), 0);
+      assert.match(await page.locator('h2').innerText(), /Failed$/);
+      await page.getByRole('link', { name: 'Open report (verification pending)', exact: true }).click();
+      assert.equal(new URL(page.url()).pathname, '/runs/123-1/');
       await page.unrouteAll({ behavior: 'wait' });
       await page.close();
     }

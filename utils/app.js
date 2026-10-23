@@ -288,6 +288,7 @@ async function ensureLocation(page) {
 					message: "location was not persisted",
 				})
 				.toBeTruthy();
+			await require('./reporting').confirmGeocodingRecovery(page, config.locationQuery);
 			return;
 		}
 		// No location and no drawer to satisfy it - leave the page
@@ -316,6 +317,7 @@ async function ensureLocation(page) {
 			message: "location was not persisted",
 		})
 		.toBeTruthy();
+	await require('./reporting').confirmGeocodingRecovery(page, config.locationQuery);
 }
 
 /** Open the auth side panel via the header Login button. Idempotent: if the

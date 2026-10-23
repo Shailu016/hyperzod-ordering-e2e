@@ -82,7 +82,9 @@ def source_context(environment):
 
 
 def publication_info(summary, context):
-    if summary.get('reportType') == 'schedule-monitor' or context.get('E2E_REPORT_PUBLISH_STATUS') != 'success':
+    verified = context.get('E2E_REPORT_PUBLISH_STATUS') == 'success'
+    pending = context.get('E2E_REPORT_DEPLOY_STATUS') == 'success' and context.get('E2E_REPORT_VERIFY_STATUS') == 'pending'
+    if summary.get('reportType') == 'schedule-monitor' or not (verified or pending):
         return None
     base = http_url(context.get('E2E_REPORT_BASE_URL', ''))
     if not base or urlparse(base).scheme != 'https' or urlparse(base).query or urlparse(base).fragment:
@@ -111,7 +113,7 @@ def publication_info(summary, context):
                     raise ValueError('Invalid evidence media path')
                 detail[kind + 'Url'] = root + item[kind]
         details.append(detail)
-    return {'url': root, 'failedUrl': root + '#failures', 'expiresAt': data['expiresAt'], 'retentionDays': data['retentionDays'], 'failures': details}
+    return {'verified': verified, 'url': root, 'failedUrl': root + '#failures', 'expiresAt': data['expiresAt'], 'retentionDays': data['retentionDays'], 'failures': details}
 
 
 def build_payload(summary, context):
@@ -157,7 +159,7 @@ def build_payload(summary, context):
         warnings = sum(project.get("warnings", 0) for project in projects)
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Required lifecycle checks: {'✅ all passed' if checks and all(value == 'passed' for value in checks) else '❌ incomplete or failed'} · {warnings} tests with diagnostic warnings"}]})
     failures = summary.get("failedTests", [])
-    if publication and publication['failures']:
+    if publication and publication['verified'] and publication['failures']:
         blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '*Failed cases*'}})
         for index, item in enumerate(publication['failures'][:3]):
             device = {'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS'}.get(item.get('project'), item.get('project', '?'))
@@ -177,6 +179,12 @@ def build_payload(summary, context):
         if len(failures) > 4:
             lines.append(f"…and {len(failures) - 4} more; open evidence below")
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Failures*\n" + "\n".join(lines)}})
+    if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success' and not schedule_monitor:
+        if publication:
+            message = 'Report deployed; live verification is pending. The report link may need a few minutes. Test results above are unchanged.'
+        else:
+            message = 'Report publishing or verification failed. Use GitHub run artifacts for screenshots, videos and the saved report. Test results above are unchanged.'
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '*Report delivery*\n' + message}})
     if issues:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule issues*\n" if schedule_monitor else "*Run issues*\n") + "\n".join("• " + clean(issue, 400 if schedule_monitor else 220) for issue in issues[:5])}})
     timing = []
@@ -198,17 +206,20 @@ def build_payload(summary, context):
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " | ".join(timing)}]})
     buttons = []
     if publication:
-        buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'Open full report'}, 'url': publication['url']})
-        if failures or publication['failures']:
+        buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'Open full report' if publication['verified'] else 'Open report (verification pending)'}, 'url': publication['url']})
+        if publication['verified'] and (failures or publication['failures']):
             buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'View failed cases'}, 'url': publication['failedUrl']})
     if url:
         buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Monitor details" if schedule_monitor else "GitHub run" if publication else "Run & evidence"}, "url": url})
     origin = http_url(summary.get("origin", context.get("BASE_URL", "")))
+    artifact_run = context.get('E2E_REPORT_ARTIFACT_RUN_ID', '')
+    if context.get('E2E_REPORT_ARTIFACT_STATUS') == 'success' and re.fullmatch(r'[\w.-]+/[\w.-]+', repository) and artifact_run.isdigit():
+        buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'Saved report & media'}, 'url': f'https://github.com/{repository}/actions/runs/{artifact_run}#artifacts'})
     if origin and not publication:
         buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Open test store"}, "url": origin})
     if buttons:
         blocks.append({"type": "actions", "elements": buttons})
-    if publication:
+    if publication and publication['verified']:
         blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': f"Screenshots and videos in the report · Evidence retained for {publication['retentionDays']} days"}]})
     # Fallback is for screen readers and notification previews; only blocks render in-channel.
     fallback = clean(heading) + " — " + detail
@@ -267,13 +278,11 @@ def main():
         summary = dict(summary, status="infrastructure-failed", error="Workflow infrastructure failed after tests")
     if context.get('E2E_EXECUTION_BLOCKED') == 'true':
         summary = dict(summary, status='infrastructure-failed', error='Scheduled execution could not be admitted; inspect the source workflow admission job')
-    elif context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success':
-        summary = dict(summary, status='infrastructure-failed', error='Report publishing failed; inspect the source GitHub run and any available artifacts')
     try:
         payload = build_payload(summary, context)
     except (OSError, ValueError, KeyError):
-        summary = dict(summary, status='infrastructure-failed', error='Published report evidence could not be validated; use the GitHub run artifacts')
-        payload = build_payload(summary, dict(context, E2E_REPORT_PUBLISH_STATUS='failure'))
+        context = dict(context, E2E_REPORT_PUBLISH_STATUS='failure', E2E_REPORT_VERIFY_STATUS='invalid')
+        payload = build_payload(summary, context)
     if os.environ.get("DRY_RUN") == "1":
         print(json.dumps(payload))
         return 0

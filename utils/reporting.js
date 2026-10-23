@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { redact } = require('./policy');
 const { isReadRequest } = require('./diagnostics');
+const geocoding = require('./geocoding-recovery');
 const capturesByPage = new WeakMap();
 function safeURL(url) { try { const value = new URL(url); return value.origin + value.pathname; } catch { return ''; } }
 function firstParty(url) {
@@ -10,7 +11,8 @@ function firstParty(url) {
   catch { return false; }
 }
 function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs = 20_000 } = {}) {
-  const capture = { consoleErrors: [], pageErrors: [], failedRequests: [], cancelledRequests: [], events: [], successfulReads: Object.create(null), successfulAccountDeletions: [] };
+  const capture = { consoleErrors: [], pageErrors: [], failedRequests: [], cancelledRequests: [], events: [], successfulReads: Object.create(null), successfulAccountDeletions: [], geocodingRecoveries: [] };
+  const mapboxResults = [];
   const pending = new Map(), requests = new Map(), listeners = [];
   let closing = false;
   const requestDocuments = new WeakMap();
@@ -26,7 +28,7 @@ function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs =
     const key = event.kind === 'console' ? 'consoleErrors' : event.kind === 'page' ? 'pageErrors' : event.kind === 'cancelled' ? 'cancelledRequests' : 'failedRequests';
     if (capture[key].length < 100) capture[key].push(event.message);
   };
-  const requestEvent = (request) => ({ method: request.method(), resourceType: request.resourceType?.(), url: request.url(), key: crypto.createHash('sha256').update(`${request.method()} ${request.url()} ${request.postData?.() || ''}`).digest('hex'), sequence: ++sequence });
+  const requestEvent = (request) => ({ method: request.method(), resourceType: request.resourceType?.(), url: request.url(), key: crypto.createHash('sha256').update(`${request.method()} ${request.url()} ${request.postData?.() || ''}`).digest('hex'), sequence: ++sequence, geocodingQueryHash: geocoding.backendQuery(request.url(), request.method()) });
   listen('framenavigated', (frame) => {
     if (frame === page.mainFrame?.() && frame.url() !== mainURL) {
       mainURL = frame.url(); navigationGeneration++;
@@ -36,7 +38,7 @@ function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs =
     if (request.resourceType?.() === 'document' && request.frame?.() === page.mainFrame?.()) documentGeneration++;
     requestDocuments.set(request, documentGeneration);
     requestNavigations.set(request, navigationGeneration);
-    if (!closing && firstParty(request.url?.()) && /\/(auth|store)\/v1\//.test(request.url())) {
+    if (!closing && ((firstParty(request.url?.()) && /\/(auth|store)\/v1\//.test(request.url())) || geocoding.mapboxQuery(request.url?.(), request.method?.()))) {
       let done;
       const finished = new Promise((resolve) => { done = resolve; });
       requests.set(request, { event: requestEvent(request), finished, done });
@@ -62,8 +64,23 @@ function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs =
     record({ ...event, navigationDiscarded, kind: /ERR_ABORTED|ERR_CANCELED|Load request cancel(?:l)?ed/i.test(failure) ? 'cancelled' : 'transport', message: `TRANSPORT ${event.method} ${safeURL(event.url)} ${failure}` });
   });
   listen('response', (response) => {
-    if (!firstParty(response.url())) return;
+    const providerQuery = geocoding.mapboxQuery(response.url(), response.request().method());
+    if (!firstParty(response.url()) && !providerQuery) return;
     const event = requestEvent(response.request()), status = response.status();
+    if (providerQuery) {
+      if (status < 200 || status >= 300 || !/json/i.test(response.headers()['content-type'] || '')) return;
+      if (pending.size >= 100) { overflow = true; return; }
+      const document = requestDocuments.get(response.request());
+      const task = (async () => {
+        try {
+          const coordinates = geocoding.featureHashes(await response.json());
+          if (coordinates.length && mapboxResults.length < 20) mapboxResults.push({ queryHash: providerQuery, coordinates, document, responseSequence: event.sequence });
+        } catch { record({ ...event, kind: 'inspection', message: 'APPLICATION Mapbox fallback response could not be inspected' }); }
+      })();
+      pending.set(task, event);
+      void task.then(() => pending.delete(task), () => { pending.delete(task); overflow = true; });
+      return;
+    }
     if (/\/(auth|store)\/v1\//.test(response.url())) {
       try { require('./api-budget').recordRateLimit(response.headers()); }
       catch { record({ ...event, kind: 'inspection', message: 'API remaining-request budget could not be persisted' }); }
@@ -149,6 +166,13 @@ function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs =
     })();
     return finished;
   };
+  capture.confirmGeocoding = (query, coordinates) => {
+    const hash = geocoding.queryHash(query), selected = geocoding.coordinateHash(coordinates);
+    const result = mapboxResults.find(item => item.queryHash === hash && item.document === documentGeneration && item.coordinates.includes(selected));
+    if (!result) return false;
+    capture.geocodingRecoveries.push({ queryHash: hash, coordinateHash: selected, responseSequence: result.responseSequence, confirmedSequence: ++sequence });
+    return true;
+  };
   capturesByPage.set(page, capture);
   return capture;
 }
@@ -157,6 +181,20 @@ async function settlePageRequests(page, timeoutMs = 20_000) {
   if (capture && !await capture.drain(true, timeoutMs)) {
     throw new Error('Page API requests did not settle; inspect diagnostics');
   }
+}
+async function confirmGeocodingRecovery(page, query) {
+  const capture = capturesByPage.get(page);
+  if (!capture || !/\/(home|m)(\/|$)/.test(new URL(page.url()).pathname)) return false;
+  await settlePageRequests(page);
+  const selection = await page.evaluate(() => {
+    const selected = document.querySelector('#app')?.__vue_app__?.config.globalProperties.$store?.getters.getSelectedLocation;
+    let persisted;
+    try { persisted = JSON.parse(localStorage.getItem('location') || 'null'); } catch { return null; }
+    if (!selected?.address || selected.address !== persisted?.address) return null;
+    return { selected: [selected.location?.longitude, selected.location?.latitude], persisted: [persisted.location?.longitude, persisted.location?.latitude] };
+  });
+  if (!selection || !geocoding.coordinateHash(selection.selected) || geocoding.coordinateHash(selection.selected) !== geocoding.coordinateHash(selection.persisted)) return false;
+  return capture.confirmGeocoding(query, selection.selected);
 }
 async function visibleToastText(page) { return redact((await page.locator('.v-snackbar__content, #app-snackbar, .alert-message').allInnerTexts()).join(' | ')).slice(0, 400); }
 async function reportFailure(testInfo, page, capture, error) {
@@ -169,4 +207,4 @@ async function reportFailure(testInfo, page, capture, error) {
     await testInfo.attach('console-log', { path: destination, contentType: 'text/plain' });
   } catch { /* do not replace the original test error */ }
 }
-module.exports = { startCapture, settlePageRequests, visibleToastText, reportFailure };
+module.exports = { startCapture, settlePageRequests, confirmGeocodingRecovery, visibleToastText, reportFailure };

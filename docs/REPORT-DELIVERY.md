@@ -101,3 +101,23 @@ The optional context contains `GITHUB_REPOSITORY`, source `GITHUB_RUN_ID`,
 `GITHUB_RUN_NUMBER`, `GITHUB_RUN_ATTEMPT`, `GITHUB_SHA`,
 `E2E_REPORT_PUBLISH_STATUS=success`, `E2E_REPORT_BASE_URL` and
 `E2E_PUBLICATION_FILE`. It needs no secret and does not call the delivery function.
+
+## Delayed publication and Slack fallback
+
+The publisher probes the exact source run/attempt manifest up to seven times,
+using cache-busting URLs, 15-second request timeouts and bounded delays totaling
+170 seconds. Its verification step has a six-minute limit. Logs show safe HTTP
+status or network failure categories without response bodies. A rate-limit
+response stops probing rather than retrying before the server permits it.
+
+If deployment succeeded but network/HTTP availability still cannot be confirmed,
+Slack includes an **Open report (verification pending)** button. It can become
+usable as Pages becomes available, without another notification or a Slack bot.
+Unverified thumbnails and direct media previews are omitted. Wrong-run, malformed,
+oversized or expired evidence cannot get a pending public link. A **Saved report &
+media** button points to the retained report artifact when its upload succeeded.
+
+Report-delivery warnings are separate from test results. Failed storefront tests
+remain Failed, passing tests remain Passed, and genuine test-run infrastructure
+failures remain Infrastructure Failed. The publisher job still fails visibly if
+verification fails. Existing webhook messages are not edited or reposted.
