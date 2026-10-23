@@ -8,6 +8,7 @@ permissions:
 jobs:
   static:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       BASE_URL: https://automations-store.hyperzod.me
       TEST_USER_EMAIL: offline-fixture@example.invalid
@@ -27,10 +28,21 @@ jobs:
           npm ci --prefix scheduler --ignore-scripts --no-audit --no-fund
           npm --prefix scheduler run check
           npm --prefix scheduler run test:runtime
-      - name: Install browsers for loopback diagnostic checks
-        run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:diagnostics:browser
-      - run: npm run test:reports:browser
+      - name: Check loopback browsers in the pinned Playwright image
+        timeout-minutes: 5
+        run: |
+          docker run --rm --init --ipc=host \
+            -v "$PWD:/work" -w /work \
+            -e BASE_URL -e TEST_USER_EMAIL -e TEST_USER_PHONE -e TEST_USER_PASSWORD \
+            mcr.microsoft.com/playwright:v1.61.1-noble \
+            bash -lc '
+              set -e
+              if ! command -v python3 >/dev/null; then
+                apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 update
+                apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 install -y --no-install-recommends python3-minimal
+              fi
+              npm run test:diagnostics:browser && npm run test:reports:browser
+            '
       - run: python3 -m unittest discover -s tests-unit -p '*_test.py'
       - name: Validate PowerShell syntax
         shell: pwsh
