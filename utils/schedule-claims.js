@@ -1,7 +1,7 @@
 const { slotRef, validateSlot, CLAIM_RETENTION_MS } = require('./schedule');
 
 function validateClaim(data, kind, due) {
-  validateSlot(kind, due);
+  validateSlot(kind, due, { historical: true });
   if (!data || data.protocol !== 'slots-v1' || data.kind !== kind || data.due !== due || !/^\d+$/.test(String(data.runId)) || !/^[1-9]\d*$/.test(String(data.attempt)) || !/^[a-f0-9]{40}$/.test(data.sha || '')) throw new Error('Invalid scheduled-slot ownership record');
   return data;
 }
@@ -18,6 +18,7 @@ async function readClaim(api, kind, due) {
 }
 
 async function claimSlot(api, proposed) {
+  validateSlot(proposed.kind, proposed.due);
   validateClaim(proposed, proposed.kind, proposed.due);
   let existing = await readClaim(api, proposed.kind, proposed.due);
   if (!existing) {
@@ -50,7 +51,7 @@ async function pruneClaims(api, now) {
     if (!match || ref.object?.type !== 'tag') continue;
     const stamp = match[2];
     const due = `${stamp.slice(0,4)}-${stamp.slice(4,6)}-${stamp.slice(6,8)}T${stamp.slice(9,11)}:${stamp.slice(11,13)}:${stamp.slice(13,15)}.000Z`;
-    validateSlot(match[1], due);
+    validateSlot(match[1], due, { historical: true });
     if (Number(now) - Date.parse(due) <= CLAIM_RETENTION_MS) continue;
     const claim = await readClaim(api, match[1], due);
     if (claim.refSha !== ref.object.sha) throw new Error('Scheduled-slot ownership changed during pruning');

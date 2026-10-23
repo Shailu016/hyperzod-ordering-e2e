@@ -65,7 +65,7 @@ payload without posting; `E2E_NOTIFICATIONS_DISABLED=true` blocks delivery entir
 
 ## Automatic schedules (IST)
 
-Full web/Android/iOS emulation suite: **1 AM, 3 AM, 5 AM, 1 PM and 6 PM daily**.
+Full web/Android/iOS emulation suite: **every two hours: 1 AM, 3 AM, 5 AM, 7 AM, 9 AM, 11 AM, 1 PM, 3 PM, 5 PM, 7 PM, 9 PM and 11 PM IST** (12 runs daily).
 All scheduled runs use `all`; smoke remains available only as an explicit manual/local suite.
 GitHub native cron remains a fallback. The optional Cloudflare clock checks every five minutes and recovers missing slots, with atomic admission preventing duplicate test execution. Activation requires its GitHub App, encrypted key and explicit cutover. A separate freshness check alerts on new overdue/missing outcomes. See [docs/INDEPENDENT-SCHEDULER.md](docs/INDEPENDENT-SCHEDULER.md) for deployment, verification and rollback.
 Notifications report completed run outcomes, not scheduled start times. No exact-clock guarantee is implied.

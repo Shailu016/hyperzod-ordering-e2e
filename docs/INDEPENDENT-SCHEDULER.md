@@ -7,7 +7,9 @@ GitHub remains responsible for runners and the existing report publisher.
 
 ## Execution and duplicate prevention
 
-Full web/Android/iOS emulation runs at **1 AM, 3 AM, 5 AM, 1 PM and 6 PM IST**.
+Full web/Android/iOS emulation runs **every two hours, at each odd hour from
+1 AM through 11 PM IST** (12 runs daily). The former 6 PM slot is retired;
+the full workflow now supplies the other eight odd-hour slots.
 The four former smoke slots now run the same complete `all` suite. Their legacy
 workflow names/paths, receipt kinds and slot tags remain unchanged to preserve
 ownership and prevent replays during migration. The Worker recognizes both old
@@ -39,6 +41,23 @@ These small metadata refs contain no screenshots, videos or test output.
 The existing `ordering-e2e-suite` queue and identity lease continue to serialize
 test-account use, including PR acceptance. Admission precedes this queue, so a
 late native duplicate cannot replace its rightful owner in the test queue.
+
+## Changing cadence without backfilling
+
+For the two-hour cadence rollout, merge both workflow definitions and the shared
+schedule first. Immediately before deploying the updated Worker, record the
+current UTC time and set both the repository variable `E2E_SCHEDULE_ENABLED_AT`
+and the ignored production config's `SCHEDULER_ENABLED_AT` to that same time.
+Keep the existing account, App installation and encrypted key. This starts at
+the next due slot and prevents a burst of historical runs or freshness alerts
+for newly added times. Record the previous cutover in the rollout audit.
+
+The four existing odd-hour slots keep their workflow and claim identities.
+Retired 6 PM ownership records remain readable and eligible for normal expiry
+cleanup, but cannot be used to admit a new execution. A late native trigger
+for the retired time is suppressed as expired, without a test-result notification.
+Current in-flight runs
+finish normally under the existing account queue.
 
 ## GitHub App and Cloudflare setup
 

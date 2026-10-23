@@ -1,4 +1,4 @@
-# Full evening suite, with native cron fallback and independent slot recovery.
+# Full suite in the eight remaining odd-hour IST slots, with native cron fallback.
 # Admission claims the slot before the shared account queue. Keep devices serial.
 
 name: scheduled-e2e-full
@@ -12,9 +12,15 @@ env:
 
 on:
   schedule:
-    # Evening full matrix: 6:00 PM IST = 12:30 UTC.
-    # The other four full runs retain their legacy scheduled-e2e-smoke.yml identity.
-    - cron: "30 12 * * *"
+    # Together with scheduled-e2e-smoke.yml: every two hours, 1 AM to 11 PM IST.
+    - cron: "30 1 * * *"
+    - cron: "30 3 * * *"
+    - cron: "30 5 * * *"
+    - cron: "30 9 * * *"
+    - cron: "30 11 * * *"
+    - cron: "30 13 * * *"
+    - cron: "30 15 * * *"
+    - cron: "30 17 * * *"
   workflow_dispatch:
     inputs:
       suite:

@@ -41,7 +41,7 @@ function fakeClaims() {
   return { api, refs, tags };
 }
 
-test('shared schedule preserves all five IST run times and UTC date rollover', () => {
+test('shared schedule preserves the four original odd-hour claims and UTC date rollover', () => {
   assert.equal(SCHEDULES.smoke.crons.length, 4);
   assert.equal(mostRecentDue(SCHEDULES.smoke.crons, new Date('2026-10-14T20:00:00Z')).toISOString(), '2026-10-14T19:30:00.000Z');
   assert.deepEqual(recentSlots(SCHEDULES.smoke.crons, new Date('2026-10-15T01:00:00Z')), [
@@ -66,7 +66,7 @@ test('queued, running, passed and failed executions of the exact slot all preven
 });
 
 test('a different slot, device, branch or legacy title never satisfies missing scheduled coverage', () => {
-  for (const change of [{ display_title: slotTitle('full', '2026-10-15T12:30:00.000Z') }, { head_branch: 'feature' }, { display_title: 'scheduled-e2e-smoke' }]) {
+  for (const change of [{ display_title: slotTitle('full', '2026-10-15T13:30:00.000Z') }, { head_branch: 'feature' }, { display_title: 'scheduled-e2e-smoke' }]) {
     const run = { event: 'workflow_dispatch', head_branch: 'main', display_title: slotTitle('smoke', due), ...change };
     assert.deepEqual(recoveryPlan({ kind: 'smoke', now, enabledAt: due, runs: [run] }), [due]);
   }
@@ -209,4 +209,18 @@ test('monitor verifies the exact claimed attempt, independent of dynamic titles 
     await assert.rejects(readClaimOwner(api, claim(), 'scheduled-e2e-smoke.yml'), /verifiable workflow owner/);
     source[field] = old;
   }
+});
+
+
+test('retired 6 PM ownership stays verifiable and can expire without authorizing another execution', async () => {
+  const { readClaim } = require('../utils/schedule-claims');
+  const { api, refs } = fakeClaims();
+  const record = { protocol: 'slots-v1', kind: 'full', due: '2026-09-30T12:30:00.000Z', runId: '321', attempt: '1', sha };
+  const name = slotRef(record.kind, record.due);
+  const tag = await api('git/tags', 'POST', { tag: name, message: JSON.stringify(record), object: sha });
+  await api('git/refs', 'POST', { ref: 'refs/tags/' + name, sha: tag.sha });
+  assert.equal((await readClaim(api, record.kind, record.due)).runId, '321');
+  await assert.rejects(claimSlot(api, record), /Slot does not match/);
+  assert.equal(await pruneClaims(api, now), 1);
+  assert.equal(refs.size, 0);
 });

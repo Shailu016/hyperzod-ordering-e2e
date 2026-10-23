@@ -4,7 +4,7 @@ const { generateKeyPairSync, verify, constants } = require('node:crypto');
 const { slotTitle } = require('../utils/schedule');
 const load = () => import('../scheduler/worker.mjs');
 const due = '2026-10-15T07:30:00.000Z';
-const now = new Date('2026-10-15T10:00:00Z');
+const now = new Date('2026-10-15T07:40:00Z');
 const environment = { SCHEDULER_ENABLED: 'true', SCHEDULER_ENABLED_AT: due, GITHUB_REPOSITORY: 'Owner/Repo' };
 const marker = Buffer.from('env:\n  E2E_SCHEDULE_PROTOCOL: slots-v1\n').toString('base64');
 function fakeAPI({ runs = [], legacy = false, onDispatch } = {}) {
@@ -82,4 +82,15 @@ test('missing, expired or incorrectly scoped authentication never reaches a work
   const { appToken, tick } = await load();
   await assert.rejects(appToken({ GITHUB_APP_ID: '1' }, { request: () => { throw new Error('Must not send'); } }), /identity/);
   await assert.rejects(tick(environment, { now, tokenProvider: async () => { throw new Error('Authentication failed'); } }), /Authentication failed/);
+});
+
+test('worker dispatches a new 7 PM slot after cutover without replaying the retired 6 PM slot', async () => {
+  const { tick } = await load();
+  const { api, calls } = fakeAPI();
+  const result = await tick({ ...environment, SCHEDULER_ENABLED_AT: '2026-10-23T12:45:00.000Z' }, { now: new Date('2026-10-23T13:35:00.000Z'), api });
+  assert.deepEqual(result.dispatched, [{ kind: 'full', due: '2026-10-23T13:30:00.000Z', title: 'Ordering full · slot 2026-10-23T13:30:00.000Z' }]);
+  const posts = calls.filter(call => call.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].path, 'actions/workflows/scheduled-e2e.yml/dispatches');
+  assert.deepEqual(posts[0].body, { ref: 'main', inputs: { suite: 'all', schedule_slot: '2026-10-23T13:30:00.000Z' } });
 });

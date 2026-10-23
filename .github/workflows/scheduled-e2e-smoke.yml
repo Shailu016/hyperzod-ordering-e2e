@@ -1,7 +1,7 @@
 # Full web/Android/iOS suite at 1 AM, 3 AM, 5 AM and 1 PM IST.
 # The legacy workflow name/path and slot ownership remain stable so previously
 # completed smoke slots and delayed native triggers cannot execute twice.
-# The 6 PM full run remains in scheduled-e2e.yml. All use the shared account queue.
+# The other eight odd-hour slots are in scheduled-e2e.yml. All use the shared account queue.
 
 name: scheduled-e2e-smoke
 

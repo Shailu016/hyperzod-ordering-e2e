@@ -2,7 +2,7 @@
 // Keep this module free of Node-only imports so Wrangler can bundle it unchanged.
 const SCHEDULES = Object.freeze({
   smoke: Object.freeze({ workflow: 'scheduled-e2e-smoke.yml', suite: 'all', label: 'full', legacySuites: ['smoke'], crons: ['30 19 * * *', '30 21 * * *', '30 23 * * *', '30 7 * * *'] }),
-  full: Object.freeze({ workflow: 'scheduled-e2e.yml', suite: 'all', crons: ['30 12 * * *'] }),
+  full: Object.freeze({ workflow: 'scheduled-e2e.yml', suite: 'all', crons: ['30 1 * * *', '30 3 * * *', '30 5 * * *', '30 9 * * *', '30 11 * * *', '30 13 * * *', '30 15 * * *', '30 17 * * *'], legacyCrons: ['30 12 * * *'] }),
 });
 const MAX_RECOVERY_MS = 6 * 60 * 60_000;
 const CLAIM_RETENTION_MS = 14 * 24 * 60 * 60_000;
@@ -42,11 +42,13 @@ function mostRecentDue(crons, now) {
   return new Date(slots[slots.length - 1]);
 }
 
-function validateSlot(kind, value) {
+function validateSlot(kind, value, { historical = false } = {}) {
   const config = SCHEDULES[kind];
   if (!config || typeof value !== 'string') throw new Error('Unknown scheduled slot');
   const due = timestamp(value);
-  if (due.toISOString() !== value || due.getUTCSeconds() || due.getUTCMilliseconds() || !config.crons.some((cron) => {
+  // Retired times are valid only when reading/pruning historical ownership.
+  const crons = historical ? [...config.crons, ...(config.legacyCrons || [])] : config.crons;
+  if (due.toISOString() !== value || due.getUTCSeconds() || due.getUTCMilliseconds() || !crons.some((cron) => {
     const [hour, minute] = cronTime(cron);
     return hour === due.getUTCHours() && minute === due.getUTCMinutes();
   })) throw new Error('Slot does not match this workflow schedule');
@@ -54,7 +56,7 @@ function validateSlot(kind, value) {
 }
 
 function slotRef(kind, value) {
-  validateSlot(kind, value);
+  validateSlot(kind, value, { historical: true });
   return `e2e-schedule-${kind}-${value.replace(/[-:.]/g, '')}`;
 }
 
@@ -80,6 +82,8 @@ function admissionSlot({ kind, event, eventSchedule, requestedSlot, suite, baseU
   if (event === 'workflow_dispatch' && !requestedSlot) return { mode: 'manual', due: null };
   let due;
   if (event === 'schedule') {
+    // A native trigger queued before cadence migration must be suppressed quietly.
+    if (config.legacyCrons?.includes(eventSchedule)) return { mode: 'expired', due: mostRecentDue([eventSchedule], timestamp(createdAt)).toISOString() };
     if (!config.crons.includes(eventSchedule)) throw new Error('Unexpected native schedule');
     due = mostRecentDue([eventSchedule], timestamp(createdAt)).toISOString();
   } else if (event === 'workflow_dispatch') {

@@ -9,7 +9,7 @@ const { Miniflare, Log, LogLevel, convertV4MiniflareOptions } = require('minifla
 test('production scheduler transport and authentication work in the Workers runtime', async (t) => {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const env = {
-    SCHEDULER_ENABLED: 'true', SCHEDULER_ENABLED_AT: '2026-10-16T00:00:00.000Z',
+    SCHEDULER_ENABLED: 'true', SCHEDULER_ENABLED_AT: '2026-10-16T07:30:00.000Z',
     GITHUB_REPOSITORY: 'Owner/Repo', GITHUB_APP_ID: '123', GITHUB_INSTALLATION_ID: '456', GITHUB_REPOSITORY_ID: '789',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
   };
