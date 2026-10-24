@@ -63,9 +63,20 @@ for setup, retention, exposure, rollout and local previews.
 Without `SLACK_WEBHOOK_URL` delivery fails visibly. `DRY_RUN=1` prints the
 payload without posting; `E2E_NOTIFICATIONS_DISABLED=true` blocks delivery entirely.
 
+Optional Gemini explanations run only after failed/flaky cases are recorded.
+Add `GEMINI_API_KEY` as a repository Actions secret to enable them; the publisher
+uses `gemini-3.5-flash-lite` unless repository variable `GEMINI_MODEL` overrides it.
+Analysis has a hard **60-second** process deadline and one API request per report.
+Timeouts, quota errors and invalid output preserve the original results and report
+delivery. Only allowlisted technical facts are sent, never raw logs, screenshots,
+recordings, credentials, request bodies or personal details. Explanations label
+possible causes as unconfirmed and never change pass/fail status. Set repository
+variable `E2E_AI_ANALYSIS_DISABLED=true` to disable calls without removing the key.
+See [docs/REPORT-DELIVERY.md](docs/REPORT-DELIVERY.md) for privacy and local use.
+
 ## Automatic schedules (IST)
 
-Full web/Android/iOS emulation suite: **1 AM, 3 AM, 5 AM, 1 PM and 6 PM daily**.
+Full web/Android/iOS emulation suite: **every two hours: 1 AM, 3 AM, 5 AM, 7 AM, 9 AM, 11 AM, 1 PM, 3 PM, 5 PM, 7 PM, 9 PM and 11 PM IST** (12 runs daily).
 All scheduled runs use `all`; smoke remains available only as an explicit manual/local suite.
 GitHub native cron remains a fallback. The optional Cloudflare clock checks every five minutes and recovers missing slots, with atomic admission preventing duplicate test execution. Activation requires its GitHub App, encrypted key and explicit cutover. A separate freshness check alerts on new overdue/missing outcomes. See [docs/INDEPENDENT-SCHEDULER.md](docs/INDEPENDENT-SCHEDULER.md) for deployment, verification and rollback.
 Notifications report completed run outcomes, not scheduled start times. No exact-clock guarantee is implied.

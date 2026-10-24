@@ -10,6 +10,10 @@ import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+_ai_spec = importlib.util.spec_from_file_location('failure_analysis', Path(__file__).with_name('failure_analysis.py'))
+failure_analysis = importlib.util.module_from_spec(_ai_spec)
+_ai_spec.loader.exec_module(failure_analysis)
+
 DEVICES = {'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS', 'setup': 'Signup'}
 MAX_SITE_BYTES = 850 * 1024 * 1024
 MAX_BUNDLE_BYTES = 250 * 1024 * 1024
@@ -108,6 +112,9 @@ def prepare(input_dir, output_dir, source, now=None):
     if any(str(identity.get(field, '')) != str(source.get(field, '')) for field in ('id', 'run_attempt', 'head_sha')):
         raise ValueError('Evidence belongs to another source attempt or revision')
     summary = read_json(input_dir / 'summary.json')
+    # Never accept a claimed AI assessment from the downloaded execution artifact.
+    summary.pop('failureAnalysis', None)
+    summary.pop('analysisEvidence', None)
     if not str(summary.get('runId', '')).startswith(run_id + '-') or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', summary['runId']):
         raise ValueError('Artifact belongs to another source run')
     if not summary.get('finishedAt') or summary.get('status') not in ('passed', 'failed', 'infrastructure-failed'):
@@ -187,6 +194,11 @@ def prepare(input_dir, output_dir, source, now=None):
     # Publish only selected summary fields, not raw reports or runner filesystem paths.
     metadata['projects'] = [{key: item.get(key) for key in ('project', 'status', 'counts', 'critical', 'warnings')} for item in summary.get('projects', [])]
     metadata.update({'schemaVersion': 1, 'runKey': run_key, 'sourceRunId': run_id, 'sourceAttempt': attempt, 'sourceSha': source.get('head_sha', ''), 'runNumber': source.get('run_number', ''), 'sourceUrl': source.get('html_url', ''), 'expiresAt': iso(expires), 'retentionDays': days, 'failures': details, 'warnings': warnings})
+    analysis = failure_analysis.analyze(details if summary['status'] != 'passed' else [])
+    if analysis['status'] in ('complete', 'unavailable'):
+        metadata['failureAnalysis'] = analysis
+        summary['failureAnalysis'] = analysis
+        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error')} for item in details]
     write_json(run_root / 'manifest.json', metadata)
     render_run(run_root, metadata)
     if sum(entry.stat().st_size for entry in run_root.rglob('*') if entry.is_file()) > MAX_BUNDLE_BYTES:
@@ -202,6 +214,32 @@ def prepare(input_dir, output_dir, source, now=None):
 
 def count_text(counts):
     return ' · '.join(str(counts.get(key, 0)) + ' ' + label for key, label in [('passed', 'passed'), ('failed', 'failed'), ('skipped', 'skipped'), ('flaky', 'flaky'), ('notRun', 'not run')])
+
+
+def analysis_html(data, case_id=None):
+    if not data.get('failureAnalysis'):
+        return ''
+    try:
+        analysis = failure_analysis.validate_analysis(data['failureAnalysis'], data.get('failures', []))
+    except (ValueError, TypeError, KeyError):
+        return ''
+    if analysis['status'] == 'unavailable':
+        reason = {'timeout': 'the 60-second limit was reached', 'authentication': 'the API key was not accepted', 'quota': 'the provider quota was reached', 'model-unavailable': 'the configured model is unavailable'}.get(analysis.get('reason'), 'the provider did not return a usable explanation')
+        return '<p class="notice">AI explanation unavailable: ' + reason + '. Original test results and evidence are unchanged.</p>'
+    if analysis['status'] != 'complete':
+        return ''
+    groups = [group for group in analysis['groups'] if case_id is None or case_id in group['failureIds']]
+    if not groups:
+        return ''
+    body = '<section class="notice"><h2>AI explanation · advisory</h2><p class="muted">Based on limited diagnostic facts. Screenshots and videos were not sent to AI. Possible causes are unconfirmed; test results are unchanged.</p>'
+    for group in groups:
+        assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
+        body += '<article><h3>' + esc(' / '.join(DEVICES[name] for name in group['devices'])) + ' · ' + esc(assessment) + '</h3>'
+        body += '<p><strong>Observation:</strong> ' + esc(group['observation']) + '</p><p><strong>Possible cause:</strong> ' + esc(group['possibleCause']) + '</p><p><strong>Next check:</strong> ' + esc(group['nextCheck']) + '</p></article>'
+    if case_id is None:
+        covered = sum(len(group['failureIds']) for group in groups)
+        body += '<p class="small">Explains ' + str(covered) + ' of ' + str(len(data.get('failures', []))) + ' failed/flaky cases. All original failures appear below.</p>'
+    return body + '</section>'
 
 
 def render_run(root, data):
@@ -220,10 +258,11 @@ def render_run(root, data):
         if (root / 'devices' / name / 'index.html').is_file():
             body += '<a class="button" href="devices/' + esc(name) + '/">Open Playwright report</a>'
         body += '</article>'
-    body += '</div><h2 id="failures">Failed cases</h2>'
+    body += '</div>' + analysis_html(data) + '<h2 id="failures">Failed cases</h2>'
     for item in data['failures']:
         body += '<article class="card"><strong>' + esc(DEVICES[item['project']]) + ' · ' + esc(item['title']) + '</strong><pre>' + esc(item['error'][:1000]) + '</pre><a class="button" href="' + esc(item['path']) + '">Inspect failure</a></article>'
         content = '<p><a href="../index.html#failures">← Failed cases</a></p><h1>' + esc(item['title']) + '</h1><p>' + esc(DEVICES[item['project']]) + ' · ' + esc(ist(data['finishedAt'])) + '</p><pre>' + esc(item['error']) + '</pre>'
+        content += analysis_html(data, item['id'])
         for kind in ('screenshot', 'video'):
             if kind in item:
                 src = '../' + item[kind]

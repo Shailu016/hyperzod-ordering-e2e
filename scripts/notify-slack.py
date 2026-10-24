@@ -8,8 +8,13 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 import re
 import math
+import importlib.util
 from urllib.parse import urlparse
 from pathlib import Path
+
+_ai_spec = importlib.util.spec_from_file_location('failure_analysis', Path(__file__).with_name('failure_analysis.py'))
+failure_analysis = importlib.util.module_from_spec(_ai_spec)
+_ai_spec.loader.exec_module(failure_analysis)
 
 
 def clean(value, limit=300):
@@ -179,6 +184,23 @@ def build_payload(summary, context):
         if len(failures) > 4:
             lines.append(f"…and {len(failures) - 4} more; open evidence below")
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Failures*\n" + "\n".join(lines)}})
+    if not schedule_monitor and summary.get('failureAnalysis'):
+        try:
+            analysis = failure_analysis.validate_analysis(summary['failureAnalysis'], summary.get('analysisEvidence', []))
+        except (ValueError, TypeError, KeyError):
+            analysis = {'status': 'unavailable'}
+        if analysis['status'] == 'complete':
+            blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'AI explanation · advisory · based on diagnostic facts; screenshots/videos were not sent to AI. Possible causes are unconfirmed.'}]})
+            for group in analysis['groups'][:3]:
+                devices = ' / '.join({'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS', 'setup': 'Signup'}[name] for name in group['devices'])
+                assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
+                text = f"*{clean(devices, 80)} · {clean(assessment, 60)}*\n*Observation:* {clean(group['observation'], 350)}\n*Possible cause:* {clean(group['possibleCause'], 350)}\n*Next check:* {clean(group['nextCheck'], 350)}"
+                blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}})
+            if len(analysis['groups']) > 3:
+                blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'More AI explanations are available in the full report.'}]})
+        elif analysis['status'] == 'unavailable':
+            reason = {'timeout': '60-second limit reached', 'authentication': 'API key not accepted', 'quota': 'provider quota reached', 'model-unavailable': 'configured model unavailable'}.get(analysis.get('reason'), 'provider unavailable or invalid response')
+            blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'AI explanation unavailable (' + reason + '). Original results and evidence are unchanged.'}]})
     if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success' and not schedule_monitor:
         if publication:
             message = 'Report deployed; live verification is pending. The report link may need a few minutes. Test results above are unchanged.'

@@ -32,6 +32,7 @@ test('both clocks share slot identity and admission runs before the shared test 
     assert.ok(workflow.on.workflow_dispatch.inputs.schedule_slot);
     assert.match(workflow['run-name'], /inputs\.schedule_slot/);
     assert.equal(workflow.jobs.admission.steps.find((step) => step.id === 'claim').env.E2E_SCHEDULE_KIND, kind);
+    assert.equal(workflow.jobs.admission.steps.find((step) => step.id === 'claim').env.E2E_SCHEDULE_ENABLED_AT, '${{ vars.E2E_SCHEDULE_ENABLED_AT }}');
     assert.equal(workflow.jobs.e2e.needs, 'admission');
     assert.match(workflow.jobs.e2e.if, /admission\.outputs\.admitted == 'true'/);
     assert.equal(workflow.jobs.e2e.concurrency.group, 'ordering-e2e-suite');
@@ -65,4 +66,20 @@ test('privileged publisher executes trusted main code and verifies before sendin
   assert.equal(notify.env.E2E_SOURCE_RUN_ATTEMPT, '${{ steps.source.outputs.attempt }}');
   assert.equal(notify.env.E2E_REPORT_BASE_URL, '${{ steps.deployment.outputs.page_url }}');
   assert.ok(job.steps.findIndex((step) => step.id === 'verify') < job.steps.indexOf(notify));
+});
+
+
+test('static browser checks use the accepted pinned image with both checks and bounded setup', () => {
+  const workflow = load('verify-pr.yml');
+  const browser = workflow.jobs.static.steps.find(step => step.name === 'Check loopback browsers in the pinned Playwright image');
+  assert.ok(browser);
+  const image = browser.run.match(/mcr\.microsoft\.com\/playwright:v[\d.]+-noble/)[0];
+  assert.equal(image, workflow.jobs.acceptance.container.image);
+  assert.ok(browser.run.includes('npm run test:diagnostics:browser && npm run test:reports:browser'));
+  assert.match(browser.run, /docker run --rm --init --ipc=host/);
+  assert.match(browser.run, /-v "\$PWD:\/work" -w \/work/);
+  assert.ok(!workflow.jobs.static.steps.some(step => step.run?.includes('playwright install --with-deps')));
+  assert.equal(browser['timeout-minutes'], 5);
+  assert.equal(workflow.jobs.static['timeout-minutes'], 15);
+  assert.ok(workflow.jobs.static.steps.some(step => step.shell === 'pwsh'));
 });

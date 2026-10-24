@@ -8,7 +8,7 @@ const YAML = require('yaml');
 const { SCHEDULES, executionSuite, admissionSlot, recoveryPlan, slotRef, slotTitle } = require('../utils/schedule');
 const due = '2026-10-17T07:30:00.000Z';
 
-test('all five daily slots use the full suite at the unchanged IST times', () => {
+test('all twelve daily slots use the full suite at exact two-hour IST intervals', () => {
   const times = [];
   for (const config of Object.values(SCHEDULES)) {
     assert.equal(config.suite, 'all');
@@ -17,20 +17,20 @@ test('all five daily slots use the full suite at the unchanged IST times', () =>
       times.push((hour * 60 + minute + 330) % 1440);
     }
   }
-  assert.deepEqual(times.sort((a, b) => a - b), [60, 180, 300, 780, 1080]);
+  assert.deepEqual(times.sort((a, b) => a - b), Array.from({ length: 12 }, (_, index) => 60 + index * 120));
 });
 
 test('native and recovered slots always execute full coverage, including old Worker input', () => {
   for (const kind of Object.keys(SCHEDULES)) {
     assert.equal(executionSuite({ kind, event: 'schedule' }), 'all');
-    const requestedSlot = kind === 'smoke' ? due : '2026-10-17T12:30:00.000Z';
+    const requestedSlot = kind === 'smoke' ? due : '2026-10-17T13:30:00.000Z';
     assert.equal(executionSuite({ kind, event: 'workflow_dispatch', requestedSlot, requestedSuite: 'all' }), 'all');
   }
   const legacy = { kind: 'smoke', event: 'workflow_dispatch', requestedSlot: due, suite: 'smoke', now: '2026-10-17T07:35:00.000Z' };
   assert.equal(admissionSlot(legacy).mode, 'scheduled');
   assert.equal(admissionSlot({ ...legacy, suite: 'all' }).mode, 'scheduled');
   assert.equal(executionSuite({ ...legacy, requestedSuite: legacy.suite }), 'all');
-  assert.throws(() => admissionSlot({ ...legacy, kind: 'full', requestedSlot: '2026-10-17T12:30:00.000Z', now: '2026-10-17T12:35:00.000Z' }));
+  assert.throws(() => admissionSlot({ ...legacy, kind: 'full', requestedSlot: '2026-10-17T13:30:00.000Z', now: '2026-10-17T13:35:00.000Z' }));
 });
 
 test('explicit manual suites remain available and invalid executions fail closed', () => {
@@ -85,4 +85,50 @@ test('suite resolution CLI emits a real Actions output for a legacy recovery dis
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.readFileSync(output, 'utf8'), 'name=all\n');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test('two-hour cadence stays continuous across UTC/IST midnight with one owner per slot', () => {
+  const { recentSlots } = require('../utils/schedule');
+  const now = new Date('2026-10-24T00:00:00Z');
+  const slots = Object.entries(SCHEDULES).flatMap(([kind, config]) => recentSlots(config.crons, now, 48 * 60 * 60_000).map(due => ({ kind, due }))).sort((a, b) => a.due.localeCompare(b.due));
+  assert.equal(slots.length, 24);
+  assert.equal(new Set(slots.map(slot => slot.due)).size, slots.length);
+  for (let index = 1; index < slots.length; index++) assert.equal(Date.parse(slots[index].due) - Date.parse(slots[index - 1].due), 2 * 60 * 60_000);
+  for (const { kind, due } of slots) {
+    const eventSchedule = `${new Date(due).getUTCMinutes()} ${new Date(due).getUTCHours()} * * *`;
+    const base = { kind, suite: 'all', now: new Date(Date.parse(due) + 5 * 60_000), createdAt: due };
+    const native = admissionSlot({ ...base, event: 'schedule', eventSchedule });
+    const recovery = admissionSlot({ ...base, event: 'workflow_dispatch', requestedSlot: due });
+    assert.equal(native.due, recovery.due);
+    assert.equal(slotRef(kind, native.due), slotRef(kind, recovery.due));
+  }
+});
+
+test('cadence rollout starts with the next new slot rather than backfilling earlier hours', () => {
+  const base = { kind: 'full', enabledAt: '2026-10-23T12:45:00.000Z', runs: [] };
+  assert.deepEqual(recoveryPlan({ ...base, now: '2026-10-23T13:00:00.000Z' }), []);
+  assert.deepEqual(recoveryPlan({ ...base, now: '2026-10-23T13:31:00.000Z' }), []);
+  const next = '2026-10-23T13:30:00.000Z';
+  assert.deepEqual(recoveryPlan({ ...base, now: '2026-10-23T13:35:00.000Z' }), [next]);
+  const runs = [{ event: 'workflow_dispatch', head_branch: 'main', display_title: slotTitle('full', next), status: 'queued' }];
+  assert.deepEqual(recoveryPlan({ ...base, runs, now: '2026-10-23T13:40:00.000Z' }), []);
+});
+
+test('retired 6 PM cron and dispatch cannot admit a new run', () => {
+  const base = { kind: 'full', suite: 'all', now: '2026-10-23T12:35:00.000Z', createdAt: '2026-10-23T12:35:00.000Z' };
+  assert.deepEqual(admissionSlot({ ...base, event: 'schedule', eventSchedule: '30 12 * * *' }), { mode: 'expired', due: '2026-10-23T12:30:00.000Z' });
+  assert.throws(() => admissionSlot({ ...base, event: 'workflow_dispatch', requestedSlot: '2026-10-23T12:30:00.000Z' }), /Slot does not match/);
+});
+
+
+test('both clocks suppress pre-cutover slots while post-cutover and manual runs remain available', () => {
+  const due = '2026-10-23T13:30:00.000Z';
+  const base = { kind: 'full', suite: 'all', now: '2026-10-23T13:35:00.000Z', createdAt: '2026-10-23T13:35:00.000Z' };
+  for (const event of [{ event: 'schedule', eventSchedule: '30 13 * * *' }, { event: 'workflow_dispatch', requestedSlot: due }]) {
+    assert.deepEqual(admissionSlot({ ...base, ...event, enabledAt: '2026-10-23T13:31:00.000Z' }), { mode: 'expired', due });
+    assert.equal(admissionSlot({ ...base, ...event, enabledAt: due }).mode, 'scheduled');
+    assert.throws(() => admissionSlot({ ...base, ...event, enabledAt: 'invalid' }), /Invalid schedule timestamp/);
+  }
+  assert.equal(admissionSlot({ ...base, event: 'workflow_dispatch', enabledAt: '2026-10-23T13:31:00.000Z' }).mode, 'manual');
 });
