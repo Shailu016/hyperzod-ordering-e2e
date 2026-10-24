@@ -121,3 +121,45 @@ Report-delivery warnings are separate from test results. Failed storefront tests
 remain Failed, passing tests remain Passed, and genuine test-run infrastructure
 failures remain Infrastructure Failed. The publisher job still fails visibly if
 verification fails. Existing webhook messages are not edited or reposted.
+
+## Optional Gemini failure explanations
+
+Configure the repository Actions secret `GEMINI_API_KEY`. Only the trusted-main
+publisher's preparation step receives it; storefront tests, fork PRs and the
+Cloudflare scheduler do not receive it. `GEMINI_MODEL` is an optional repository
+variable (default `gemini-3.5-flash-lite`). `E2E_AI_ANALYSIS_DISABLED=true` disables
+analysis. Local Python publishing reads exported environment variables rather
+than loading `.env` automatically. Keep local keys in ignored `.env` and export
+them only to the publisher process.
+
+Tests finish first. Failed/flaky cases are grouped into at most eight distinct
+technical signatures and sent in one HTTPS request to Google's Gemini API.
+Each packet contains only a device enum, inferred scenario intent, known error
+codes, assertion name, allowlisted CSS ID, timeout, HTTP status and known static
+API routes. Dynamic resource paths, URL queries, raw errors, stack traces, DOM,
+screenshots, recordings, request/response bodies, user identifiers and tokens are
+not sent. Generic failures may consequently have insufficient evidence; the AI
+must say the cause is unknown. Media remains available in the original report.
+Google's free API tier has quotas and may use submitted content to improve its
+products; see https://ai.google.dev/gemini-api/docs/pricing.
+
+The parent process kills the worker at **60 seconds**, including network stalls.
+There are no retries and no automatic paid-model fallback. Authentication,
+quota, timeout and malformed/incomplete responses produce a short unavailable
+notice while preserving report publishing, original test outcomes, and Slack
+delivery. Passing reports make no AI call. Explanations are supplementary and
+cannot pass a test, authorize a mutation, rerun a scenario or execute model output.
+
+The report overview and each covered failure page show the explanation; Slack
+shows up to three groups and links to the full evidence. Observations, possible
+causes and the next investigation step remain separate. All suspected causes are
+labelled unconfirmed. Output must reference exactly the submitted groups; case
+association is reconstructed locally and bound to an evidence fingerprint.
+Untrusted execution artifacts cannot supply their own analysis. HTML/Slack
+renderers escape provider text and never expose raw provider errors or keys.
+The explanation follows the same 3/14-day report retention without entering Git.
+
+Offline checks: `python -m unittest discover -s tests-unit -p '*_test.py'`.
+These include a real stuck-child termination check, privacy allowlisting,
+cross-case identity rejection and end-to-end HTML/Slack rendering with mocks.
+No key, storefront access or Slack delivery is needed for these checks.

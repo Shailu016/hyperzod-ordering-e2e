@@ -25,6 +25,40 @@ spec.loader.exec_module(notifier)
 
 
 class ReportDeliveryTests(unittest.TestCase):
+    def test_optional_ai_reaches_html_and_slack_without_changing_result(self):
+        def explained(failures):
+            groups = report_site.failure_analysis.evidence_groups(failures)
+            return {'schemaVersion': 1, 'status': 'complete', 'provider': 'gemini', 'model': 'gemini-3.5-flash-lite',
+                'evidenceHash': report_site.failure_analysis.fingerprint(failures), 'groups': [dict(group,
+                category='unknown', observation='The assertion failed.', possibleCause='Cause unknown.', nextCheck='Inspect the captured evidence.') for group in groups]}
+        # An artifact cannot supply its own AI assessment.
+        report_site.write_json(self.input / 'summary.json', dict(self.summary, failureAnalysis={'status': 'passed'}, analysisEvidence=['untrusted']))
+        with patch.object(report_site.failure_analysis, 'analyze', side_effect=explained) as analyze:
+            output, metadata = self.build()
+        analyze.assert_called_once()
+        self.assertEqual(metadata['status'], self.summary['status'])
+        self.assertEqual(metadata['counts'], self.summary['counts'])
+        self.assertEqual(metadata['failureAnalysis']['status'], 'complete')
+        root = output / 'bundle' / 'runs' / '123-2'
+        self.assertIn('AI explanation', (root / 'index.html').read_text(encoding='utf-8'))
+        self.assertIn('Cause unknown', (root / metadata['failures'][0]['path']).read_text(encoding='utf-8'))
+        summary = report_site.read_json(output / 'notification.json')
+        payload = notifier.build_payload(summary, self.context(output))
+        self.assertIn('AI explanation', json.dumps(payload))
+        self.assertIn('Ordering full', payload['blocks'][0]['text']['text'])
+        self.assertIn('Failed', payload['blocks'][0]['text']['text'])
+
+    def test_ai_timeout_keeps_publication_and_original_failed_evidence(self):
+        with patch.object(report_site.failure_analysis, 'analyze', return_value={'schemaVersion': 1, 'status': 'unavailable', 'reason': 'timeout'}):
+            output, metadata = self.build()
+        self.assertEqual(metadata['status'], 'failed')
+        root = output / 'bundle' / 'runs' / '123-2'
+        self.assertTrue((root / metadata['failures'][0]['screenshot']).is_file())
+        self.assertIn('60-second limit', (root / 'index.html').read_text(encoding='utf-8'))
+        payload = notifier.build_payload(report_site.read_json(output / 'notification.json'), self.context(output))
+        self.assertIn('Inspect failure', json.dumps(payload))
+        self.assertIn('60-second limit', json.dumps(payload))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -66,6 +66,10 @@ jobs:
       - name: Prepare public report bundle
         if: always() && steps.source.outputs.delivery == 'pages-v1' && steps.admission.outputs.publish != 'false' && steps.admission.outputs.blocked != 'true'
         id: prepare
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
+          E2E_AI_ANALYSIS_DISABLED: ${{ vars.E2E_AI_ANALYSIS_DISABLED }}
         run: python scripts/report_site.py prepare --input .report-publication/incoming --output .report-publication/prepared --source .report-publication/source-run.json
       - name: Retain generated report bundle outside Git
         id: retained
