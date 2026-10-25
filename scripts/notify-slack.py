@@ -122,7 +122,9 @@ def publication_info(summary, context):
 
 
 def build_payload(summary, context):
-    publication = publication_info(summary, context)
+    admission_blocked = context.get('E2E_EXECUTION_BLOCKED') == 'true'
+    admission_rejected = admission_blocked and context.get('E2E_ADMISSION_REJECTED') == 'true'
+    publication = None if admission_blocked else publication_info(summary, context)
     counts = summary.get("counts", {})
     status = summary.get("status", "infrastructure-failed")
     label = summary.get("suite", context.get("E2E_SUITE_LABEL", "e2e"))
@@ -135,7 +137,11 @@ def build_payload(summary, context):
         run_label += f' · attempt {attempt}'
     schedule_monitor = summary.get('reportType') == 'schedule-monitor'
     heading = f"{icon} Ordering {label} · {run_label} · {'Schedule Alert' if schedule_monitor else status.replace('-', ' ').title()}"
+    if admission_blocked:
+        heading = f"⚠️ Ordering schedule · {run_label} · {'Execution blocked' if admission_rejected else 'Execution unverified'}"
     detail = " · ".join(f"{counts.get(key, 0)} {name}" for key, name in (("passed", "passed"), ("failed", "failed"), ("skipped", "skipped"), ("flaky", "flaky"), ("notRun", "not run"))) if counts else "No complete test report available"
+    if admission_blocked:
+        detail = 'Tests did not start because schedule admission was rejected. No test report, screenshots or videos were generated.' if admission_rejected else 'Execution could not be verified because its admission receipt is missing or invalid. Test outcome is unknown; inspect the source workflow.'
     if schedule_monitor:
         detail = 'Scheduled execution is missing, delayed or interrupted. Check the schedule issue below; this monitor does not report a storefront test failure.'
     repository = context.get("GITHUB_REPOSITORY", "")
@@ -147,11 +153,11 @@ def build_payload(summary, context):
     if summary.get('leaseRetainedReason'):
         issues.append('Account lock retained: ' + summary['leaseRetainedReason'])
     blocks = [{"type": "header", "text": {"type": "plain_text", "text": clean(heading, 140), "emoji": True}},
-              {"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule status*\n" if schedule_monitor else "*Results*\n") + detail}}]
+              {"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule status*\n" if schedule_monitor or admission_blocked else "*Results*\n") + detail}}]
     target = http_url(summary.get('origin', context.get('BASE_URL', '')))
     if target and publication:
         blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'Target: <' + target + '|' + clean(urlparse(target).hostname, 150) + '>'}]})
-    projects = summary.get("projects", [])
+    projects = [] if admission_blocked else summary.get("projects", [])
     if projects:
         rows = []
         for project in projects[:8]:
@@ -163,7 +169,7 @@ def build_payload(summary, context):
         checks = [value for project in projects for value in project.get("critical", {}).values()]
         warnings = sum(project.get("warnings", 0) for project in projects)
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Required lifecycle checks: {'✅ all passed' if checks and all(value == 'passed' for value in checks) else '❌ incomplete or failed'} · {warnings} tests with diagnostic warnings"}]})
-    failures = summary.get("failedTests", [])
+    failures = [] if admission_blocked else summary.get("failedTests", [])
     if publication and publication['verified'] and publication['failures']:
         blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '*Failed cases*'}})
         for index, item in enumerate(publication['failures'][:3]):
@@ -184,7 +190,7 @@ def build_payload(summary, context):
         if len(failures) > 4:
             lines.append(f"…and {len(failures) - 4} more; open evidence below")
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Failures*\n" + "\n".join(lines)}})
-    if not schedule_monitor and summary.get('failureAnalysis'):
+    if not schedule_monitor and not admission_blocked and summary.get('failureAnalysis'):
         try:
             analysis = failure_analysis.validate_analysis(summary['failureAnalysis'], summary.get('analysisEvidence', []))
         except (ValueError, TypeError, KeyError):
@@ -201,14 +207,14 @@ def build_payload(summary, context):
         elif analysis['status'] == 'unavailable':
             reason = {'timeout': '60-second limit reached', 'authentication': 'API key not accepted', 'quota': 'provider quota reached', 'model-unavailable': 'configured model unavailable'}.get(analysis.get('reason'), 'provider unavailable or invalid response')
             blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'AI explanation unavailable (' + reason + '). Original results and evidence are unchanged.'}]})
-    if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success' and not schedule_monitor:
+    if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success' and not schedule_monitor and not admission_blocked:
         if publication:
             message = 'Report deployed; live verification is pending. The report link may need a few minutes. Test results above are unchanged.'
         else:
             message = 'Report publishing or verification failed. Use GitHub run artifacts for screenshots, videos and the saved report. Test results above are unchanged.'
         blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '*Report delivery*\n' + message}})
     if issues:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule issues*\n" if schedule_monitor else "*Run issues*\n") + "\n".join("• " + clean(issue, 400 if schedule_monitor else 220) for issue in issues[:5])}})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule issues*\n" if schedule_monitor or admission_blocked else "*Run issues*\n") + "\n".join("• " + clean(issue, 400 if schedule_monitor else 220) for issue in issues[:5])}})
     timing = []
     try:
         start = datetime.fromisoformat(summary["startedAt"].replace("Z", "+00:00"))
@@ -232,12 +238,12 @@ def build_payload(summary, context):
         if publication['verified'] and (failures or publication['failures']):
             buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'View failed cases'}, 'url': publication['failedUrl']})
     if url:
-        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Monitor details" if schedule_monitor else "GitHub run" if publication else "Run & evidence"}, "url": url})
+        buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Admission details" if admission_blocked else "Monitor details" if schedule_monitor else "GitHub run" if publication else "Run & evidence"}, "url": url})
     origin = http_url(summary.get("origin", context.get("BASE_URL", "")))
     artifact_run = context.get('E2E_REPORT_ARTIFACT_RUN_ID', '')
-    if context.get('E2E_REPORT_ARTIFACT_STATUS') == 'success' and re.fullmatch(r'[\w.-]+/[\w.-]+', repository) and artifact_run.isdigit():
+    if not admission_blocked and context.get('E2E_REPORT_ARTIFACT_STATUS') == 'success' and re.fullmatch(r'[\w.-]+/[\w.-]+', repository) and artifact_run.isdigit():
         buttons.append({'type': 'button', 'text': {'type': 'plain_text', 'text': 'Saved report & media'}, 'url': f'https://github.com/{repository}/actions/runs/{artifact_run}#artifacts'})
-    if origin and not publication:
+    if origin and not publication and not admission_blocked:
         buttons.append({"type": "button", "text": {"type": "plain_text", "text": "Open test store"}, "url": origin})
     if buttons:
         blocks.append({"type": "actions", "elements": buttons})
@@ -299,7 +305,11 @@ def main():
     if context.get("E2E_JOB_STATUS") in ("failure", "cancelled", "timed_out") and summary.get("status") == "passed":
         summary = dict(summary, status="infrastructure-failed", error="Workflow infrastructure failed after tests")
     if context.get('E2E_EXECUTION_BLOCKED') == 'true':
-        summary = dict(summary, status='infrastructure-failed', error='Scheduled execution could not be admitted; inspect the source workflow admission job')
+        rejected = context.get('E2E_ADMISSION_REJECTED') == 'true'
+        reason = {'invalid-slot': 'Requested time is outside the active workflow schedule.', 'invalid-overrides': 'Scheduled execution attempted to override its allowed suite or target.', 'future-slot': 'Requested scheduled time is in the future.', 'identity-mismatch': 'Source workflow identity or main-branch validation failed.', 'github-api': 'GitHub rejected a scheduler ownership request.'}.get(context.get('E2E_ADMISSION_REASON'), 'Inspect the source workflow admission job for the rejection reason.')
+        # Unverified/admission-rejected execution cannot inherit test counts,
+        # AI assessments, report media or results from an unrelated summary.
+        summary = {'status': 'infrastructure-failed', 'error': 'Scheduled execution could not be admitted: ' + reason if rejected else 'Execution admission could not be verified; inspect the source workflow receipt and admission job.'}
     try:
         payload = build_payload(summary, context)
     except (OSError, ValueError, KeyError):

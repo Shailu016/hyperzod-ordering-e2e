@@ -42,7 +42,29 @@ class ScheduleAdmissionTests(unittest.TestCase):
             output = root / 'outputs'
             with patch.dict(module.os.environ, {'GITHUB_OUTPUT': str(output)}), patch('sys.argv', ['admission', '--receipt', str(root / 'missing.json'), '--source', str(root / 'source.json')]), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(module.main(), 1)
-            self.assertEqual(output.read_text(encoding='utf-8'), 'publish=true\nblocked=true\n')
+            self.assertEqual(output.read_text(encoding='utf-8'), 'publish=true\nblocked=true\nrejected=false\nreason=receipt-unverified\n')
+
+    def test_verified_rejection_emits_only_allowlisted_reason_codes(self):
+        for supplied, expected in [('invalid-slot', 'invalid-slot'), ('token=secret\nrejected=false', 'unknown'), ([], 'unknown')]:
+            with tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                (root / 'source.json').write_text(json.dumps(self.source), encoding='utf-8')
+                receipt = dict(self.receipt, status='error', admitted=False, reasonCode=supplied)
+                (root / 'receipt.json').write_text(json.dumps(receipt), encoding='utf-8')
+                output = root / 'outputs'
+                with patch.dict(module.os.environ, {'GITHUB_OUTPUT': str(output)}), patch('sys.argv', ['admission', '--receipt', str(root / 'receipt.json'), '--source', str(root / 'source.json')]), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(module.main(), 0)
+                self.assertEqual(output.read_text(), 'publish=true\nblocked=true\nrejected=true\nreason=' + expected + '\n')
+
+    def test_expired_dispatch_remains_a_quiet_non_execution(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'source.json').write_text(json.dumps(self.source), encoding='utf-8')
+            (root / 'receipt.json').write_text(json.dumps(dict(self.receipt, status='expired', admitted=False)), encoding='utf-8')
+            output = root / 'outputs'
+            with patch.dict(module.os.environ, {'GITHUB_OUTPUT': str(output)}), patch('sys.argv', ['admission', '--receipt', str(root / 'receipt.json'), '--source', str(root / 'source.json')]), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(module.main(), 0)
+            self.assertEqual(output.read_text(), 'publish=false\nblocked=false\nrejected=false\nreason=\n')
 
 
 if __name__ == '__main__':

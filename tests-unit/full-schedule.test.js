@@ -118,7 +118,10 @@ test('cadence rollout starts with the next new slot rather than backfilling earl
 test('retired 6 PM cron and dispatch cannot admit a new run', () => {
   const base = { kind: 'full', suite: 'all', now: '2026-10-23T12:35:00.000Z', createdAt: '2026-10-23T12:35:00.000Z' };
   assert.deepEqual(admissionSlot({ ...base, event: 'schedule', eventSchedule: '30 12 * * *' }), { mode: 'expired', due: '2026-10-23T12:30:00.000Z' });
-  assert.throws(() => admissionSlot({ ...base, event: 'workflow_dispatch', requestedSlot: '2026-10-23T12:30:00.000Z' }), /Slot does not match/);
+  assert.deepEqual(admissionSlot({ ...base, event: 'workflow_dispatch', requestedSlot: '2026-10-23T12:30:00.000Z' }), { mode: 'expired', due: '2026-10-23T12:30:00.000Z' });
+  for (const change of [{ suite: 'android' }, { baseUrl: 'https://other.invalid' }, { now: '2026-10-23T12:29:00.000Z' }, { requestedSlot: '2026-10-23T12:31:00.000Z' }]) {
+    assert.throws(() => admissionSlot({ ...base, event: 'workflow_dispatch', requestedSlot: '2026-10-23T12:30:00.000Z', ...change }));
+  }
 });
 
 

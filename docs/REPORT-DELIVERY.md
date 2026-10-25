@@ -122,6 +122,22 @@ remain Failed, passing tests remain Passed, and genuine test-run infrastructure
 failures remain Infrastructure Failed. The publisher job still fails visibly if
 verification fails. Existing webhook messages are not edited or reposted.
 
+## Schedule admission is separate from test and report failures
+
+A verified admission rejection uses an **Execution blocked** schedule alert:
+tests did not start, so no test report or screenshots/videos were generated.
+The alert links to **Admission details** and includes an allowlisted rejection
+reason when available. It does not claim report publishing failed when publishing
+was deliberately skipped. Missing, invalid or cross-run admission receipts use
+**Execution unverified** instead; these cannot establish whether tests started.
+Neither path may display unverified test counts, AI explanations or media links.
+
+Retired native and independent-clock dispatches are validated as historical slots
+and expire without claiming execution, running tests or sending a test result.
+Arbitrary slot times, future dispatches, suite/target overrides and non-main
+execution still fail closed. Keep the deployed independent clock aligned with
+the merged schedule and use a shared fresh activation cutover during rollout.
+
 ## Optional Gemini failure explanations
 
 Configure the repository Actions secret `GEMINI_API_KEY`. Only the trusted-main

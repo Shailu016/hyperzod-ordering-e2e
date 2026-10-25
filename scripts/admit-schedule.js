@@ -3,6 +3,16 @@ const { admissionSlot, SCHEDULES } = require('../utils/schedule');
 const { claimSlot, pruneClaims } = require('../utils/schedule-claims');
 const { githubAPI, verifyWorkflowRun } = require('../utils/schedule-api');
 
+function rejectionReason(error) {
+  const message = error?.message || '';
+  if (message === 'Slot does not match this workflow schedule') return 'invalid-slot';
+  if (message === 'Scheduled recovery cannot override suite or target') return 'invalid-overrides';
+  if (message === 'A future scheduled slot cannot execute') return 'future-slot';
+  if (/identity mismatch|only on main|Unknown scheduled workflow/i.test(message)) return 'identity-mismatch';
+  if (Number.isInteger(error?.status)) return 'github-api';
+  return 'unknown';
+}
+
 async function admit({ environment = process.env, event, api, now = new Date() }) {
   const kind = environment.E2E_SCHEDULE_KIND;
   const identity = { protocol: 'slots-v1', runId: String(environment.GITHUB_RUN_ID), attempt: String(environment.GITHUB_RUN_ATTEMPT), sha: environment.GITHUB_SHA, kind };
@@ -32,7 +42,7 @@ async function main() {
     // Cleanup is metadata-only. Its failure must never replay or block an owned test.
     try { await pruneClaims(api, new Date()); } catch { console.warn('Schedule-claim cleanup failed; execution ownership remains intact'); }
     console.log(`Schedule admission: ${receipt.status}`);
-  } catch (error) { console.error(error.message); process.exitCode = 1; }
+  } catch (error) { receipt.reasonCode = rejectionReason(error); console.error(error.message); process.exitCode = 1; }
   finally {
     fs.writeFileSync('.schedule/admission.json', JSON.stringify(receipt));
     if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, `admitted=${receipt.admitted}\nstatus=${receipt.status}\n`);
@@ -40,4 +50,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { githubAPI, admit };
+module.exports = { githubAPI, admit, rejectionReason };
