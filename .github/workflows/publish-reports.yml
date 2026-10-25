@@ -121,6 +121,8 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           E2E_EXECUTION_BLOCKED: ${{ steps.admission.outputs.blocked }}
+          E2E_ADMISSION_REJECTED: ${{ steps.admission.outputs.rejected }}
+          E2E_ADMISSION_REASON: ${{ steps.admission.outputs.reason }}
           E2E_REPORT_PUBLISHER: 'true'
           E2E_SOURCE_RUN_ID: ${{ steps.source.outputs.id }}
           E2E_SOURCE_RUN_NUMBER: ${{ steps.source.outputs.number }}

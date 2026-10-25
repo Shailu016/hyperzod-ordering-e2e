@@ -3,13 +3,41 @@ const assert = require('node:assert/strict');
 const { SCHEDULES, recentSlots, mostRecentDue, admissionSlot, recoveryPlan, slotRef, slotTitle } = require('../utils/schedule');
 const { claimSlot, pruneClaims } = require('../utils/schedule-claims');
 const { githubAPI, workflowRuns, verifyWorkflowRun, readClaimOwner } = require('../utils/schedule-api');
-const { admit } = require('../scripts/admit-schedule');
+const { admit, rejectionReason } = require('../scripts/admit-schedule');
 
 const due = '2026-10-15T07:30:00.000Z';
 const now = new Date('2026-10-15T10:00:00Z');
 const sha = 'a'.repeat(40);
 const claim = (runId = '100', attempt = '1', slot = due) => ({ protocol: 'slots-v1', kind: 'smoke', due: slot, runId, attempt, sha });
 const httpError = (status) => Object.assign(new Error('HTTP ' + status), { status });
+
+test('admission rejection codes never forward arbitrary API errors or credentials', () => {
+  assert.equal(rejectionReason(new Error('Slot does not match this workflow schedule')), 'invalid-slot');
+  assert.equal(rejectionReason(new Error('Scheduled recovery cannot override suite or target')), 'invalid-overrides');
+  assert.equal(rejectionReason(new Error('A future scheduled slot cannot execute')), 'future-slot');
+  assert.equal(rejectionReason(new Error('Scheduled run identity mismatch')), 'identity-mismatch');
+  assert.equal(rejectionReason(Object.assign(new Error('Bearer private'), {status: 503})), 'github-api');
+  assert.equal(rejectionReason(new Error('token=private\nrejected=true')), 'unknown');
+});
+
+test('old Worker 6 PM dispatch expires before creating any ownership claim or tests', async () => {
+  const source = {id: 40193767998, run_attempt: 1, head_sha: sha, workflow_id: 375425968,
+    path: '.github/workflows/scheduled-e2e.yml', event: 'workflow_dispatch', head_branch: 'main', created_at: '2026-10-25T12:35:17Z'};
+  const environment = {E2E_SCHEDULE_KIND: 'full', GITHUB_RUN_ID: String(source.id), GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: sha,
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main'};
+  const calls = [];
+  const api = async (route, method = 'GET') => {
+    calls.push({route, method});
+    if (route === 'actions/runs/' + source.id) return source;
+    if (route === 'actions/workflows/scheduled-e2e.yml') return {id: source.workflow_id, path: source.path};
+    throw new Error('A retired slot must not claim execution: ' + route);
+  };
+  const result = await admit({environment, event: {inputs: {suite: 'all', schedule_slot: '2026-10-25T12:30:00.000Z'}}, api, now: new Date('2026-10-25T12:35:24Z')});
+  assert.equal(result.status, 'expired');
+  assert.equal(result.admitted, false);
+  assert.ok(calls.every(call => call.method === 'GET' && call.route.startsWith('actions/')));
+  await assert.rejects(admit({environment: {...environment, GITHUB_REF: 'refs/heads/feature'}, event: {inputs: {suite: 'all', schedule_slot: result.due}}, api, now: new Date('2026-10-25T12:35:24Z')}), /only on main/);
+});
 function fakeClaims() {
   const refs = new Map(), tags = new Map();
   let counter = 1;

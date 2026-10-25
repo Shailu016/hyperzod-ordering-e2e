@@ -88,7 +88,15 @@ function admissionSlot({ kind, event, eventSchedule, requestedSlot, suite, baseU
     due = mostRecentDue([eventSchedule], timestamp(createdAt)).toISOString();
   } else if (event === 'workflow_dispatch') {
     if (![config.suite, ...(config.legacySuites || [])].includes(suite) || baseUrl) throw new Error('Scheduled recovery cannot override suite or target');
-    due = validateSlot(kind, requestedSlot).toISOString();
+    // An older independent clock can have a retired dispatch in flight during
+    // rollout. Validate its exact historical identity, but never claim or run it.
+    due = validateSlot(kind, requestedSlot, { historical: true }).toISOString();
+    if (timestamp(due) > timestamp(now)) throw new Error('A future scheduled slot cannot execute');
+    const retired = config.legacyCrons?.some(cron => {
+      const [hour, minute] = cronTime(cron);
+      return hour === timestamp(due).getUTCHours() && minute === timestamp(due).getUTCMinutes();
+    });
+    if (retired) return { mode: 'expired', due };
   } else throw new Error('Unsupported scheduled event');
   if (enabledAt && timestamp(due) < timestamp(enabledAt)) return { mode: 'expired', due };
   const age = Number(timestamp(now)) - Number(validateSlot(kind, due));

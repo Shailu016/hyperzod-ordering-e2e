@@ -19,7 +19,7 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn('Ordering all', payload['blocks'][0]['text']['text'])
 
     def test_admission_failure_reports_the_source_job_without_posting(self):
-        environment = {'DRY_RUN': '1', 'E2E_REPORT_PUBLISHER': 'true', 'E2E_SOURCE_RUN_ID': '123', 'E2E_SOURCE_RUN_ATTEMPT': '1', 'E2E_EXECUTION_BLOCKED': 'true', 'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e'}
+        environment = {'DRY_RUN': '1', 'E2E_REPORT_PUBLISHER': 'true', 'E2E_SOURCE_RUN_ID': '123', 'E2E_SOURCE_RUN_ATTEMPT': '1', 'E2E_EXECUTION_BLOCKED': 'true', 'E2E_ADMISSION_REJECTED': 'true', 'E2E_ADMISSION_REASON': 'invalid-slot', 'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e'}
         with patch.dict(notifier.os.environ, environment, clear=True), patch.object(notifier.sys, 'argv', ['notify', 'missing.json']), patch('builtins.open', side_effect=FileNotFoundError), patch.object(notifier, 'deliver') as send:
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
@@ -28,7 +28,35 @@ class NotificationTests(unittest.TestCase):
             self.assertIn('Scheduled execution could not be admitted', rendered)
             self.assertIn('actions/runs/123', rendered)
             self.assertNotIn('Report publishing failed', rendered)
+            self.assertNotIn('Report publishing or verification failed', rendered)
+            self.assertNotIn('No complete test report available', rendered)
+            self.assertIn('Tests did not start', rendered)
+            self.assertIn('Execution blocked', rendered)
+            self.assertIn('outside the active workflow schedule', rendered)
+            self.assertIn('Admission details', rendered)
             send.assert_not_called()
+
+    def test_unverified_receipt_does_not_claim_that_tests_never_started(self):
+        environment = {'DRY_RUN': '1', 'E2E_REPORT_PUBLISHER': 'true', 'E2E_SOURCE_RUN_ID': '123', 'E2E_SOURCE_RUN_ATTEMPT': '1', 'E2E_EXECUTION_BLOCKED': 'true', 'E2E_ADMISSION_REJECTED': 'false', 'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e'}
+        with patch.dict(notifier.os.environ, environment, clear=True), patch.object(notifier.sys, 'argv', ['notify', 'missing.json']), patch('builtins.open', side_effect=FileNotFoundError), patch.object(notifier, 'deliver') as send:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                self.assertEqual(notifier.main(), 0)
+            rendered = json.dumps(json.loads(buffer.getvalue()))
+            self.assertIn('Execution unverified', rendered)
+            self.assertIn('Test outcome is unknown', rendered)
+            self.assertNotIn('Tests did not start', rendered)
+            self.assertNotIn('Report publishing or verification failed', rendered)
+            send.assert_not_called()
+
+    def test_admission_block_does_not_show_test_counts_ai_or_unverified_media(self):
+        context = {'E2E_EXECUTION_BLOCKED': 'true', 'E2E_ADMISSION_REJECTED': 'true', 'E2E_REPORT_PUBLISHER': 'true', 'E2E_REPORT_PUBLISH_STATUS': 'success', 'E2E_PUBLICATION_FILE': 'must-not-be-read.json', 'GITHUB_RUN_ID': '123', 'GITHUB_REPOSITORY': 'Shailu016/hyperzod-ordering-e2e'}
+        summary = {'status': 'passed', 'counts': {'passed': 80}, 'projects': [{'project': 'web', 'status': 'passed', 'counts': {'passed': 80}}], 'failedTests': [{'title': 'unverified old failure'}], 'failureAnalysis': {'status': 'complete'}}
+        payload = notifier.build_payload(summary, context)
+        rendered = json.dumps(payload)
+        for misleading in ('80 passed', 'unverified old failure', 'AI explanation', 'Report delivery', 'No complete test report', 'Infrastructure Failed'):
+            self.assertNotIn(misleading, rendered)
+        self.assertIn('Execution blocked', rendered)
 
     def test_schedule_alert_has_no_test_failure_heading_or_missing_report_claim(self):
         summary = {'status': 'infrastructure-failed', 'reportType': 'schedule-monitor', 'suite': 'schedule freshness',

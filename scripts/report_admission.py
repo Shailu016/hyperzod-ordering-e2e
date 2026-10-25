@@ -7,6 +7,8 @@ from pathlib import Path
 from datetime import datetime
 from report_workflow import workflow_identity
 
+REASONS = {'invalid-slot', 'invalid-overrides', 'future-slot', 'identity-mismatch', 'github-api', 'unknown'}
+
 
 def assess(receipt, source):
     kind, _, _ = workflow_identity(source)
@@ -39,8 +41,14 @@ def main():
     args = parser.parse_args()
     # Invalid/missing receipt is a visible infrastructure failure, never a silent skip.
     result = {'publish': True, 'blocked': True}
+    rejected, reason = False, 'receipt-unverified'
     try:
-        result = assess(json.loads(Path(args.receipt).read_text(encoding='utf-8')), json.loads(Path(args.source).read_text(encoding='utf-8')))
+        receipt = json.loads(Path(args.receipt).read_text(encoding='utf-8'))
+        result = assess(receipt, json.loads(Path(args.source).read_text(encoding='utf-8')))
+        rejected = result['blocked'] and receipt['status'] == 'error'
+        reason = receipt.get('reasonCode', 'unknown') if rejected else ''
+        if rejected and (not isinstance(reason, str) or reason not in REASONS):
+            reason = 'unknown'
     except (OSError, ValueError, KeyError, TypeError):
         print('Scheduled execution admission could not be verified')
         return_code = 1
@@ -51,6 +59,7 @@ def main():
     if output:
         with open(output, 'a', encoding='utf-8') as handle:
             handle.write(''.join(key + '=' + str(value).lower() + '\n' for key, value in result.items()))
+            handle.write('rejected=' + str(rejected).lower() + '\nreason=' + reason + '\n')
     return return_code
 
 
