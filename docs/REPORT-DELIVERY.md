@@ -185,6 +185,9 @@ An HTTP200 application-level rejection is reported as such; an auth message
 never invents an HTTP401. A post-test diagnostic-guard failure is distinguished
 from a failed UI assertion. Event order does not prove its timing relative to
 logout when no logout marker was captured.
+For a login/logout token rejection raised by the post-test guard, component
+attribution stays unconfirmed until that timing evidence exists, even if a model
+suggests a frontend/backend category. The captured rejection is still explained.
 
 Structured model output must use the submitted case groups and allowed
 categories. Observations with captured API evidence are rendered from those

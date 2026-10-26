@@ -200,7 +200,7 @@ def build_payload(summary, context):
             blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'AI explanation · advisory · based on diagnostic facts; screenshots/videos were not sent to AI. Possible causes are unconfirmed.'}]})
             for group in analysis['groups'][:3]:
                 devices = ' / '.join({'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS', 'setup': 'Signup'}[name] for name in group['devices'])
-                assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
+                assessment = 'Cause unconfirmed' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
                 evidence = [item for item in summary.get('analysisEvidence', []) if item.get('id') in group['failureIds']]
                 titles = list(dict.fromkeys(clean(item.get('title', ''), 180) for item in evidence))
                 cases = '\n*Case:* ' + '; '.join(titles[:2]) if titles else ''

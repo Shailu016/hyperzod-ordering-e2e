@@ -191,8 +191,10 @@ class FailureAnalysisTests(unittest.TestCase):
         self.assertEqual(facts['apiRoutes'], ['/auth/v1/me'])
         self.assertEqual(facts['apiMessage'], 'Unauthorized token.')
         enriched = dict(failure, technicalFacts=facts)
-        result = dict(self.result, evidenceHash=ai.fingerprint([enriched]), groups=[dict(self.entry, observation='No error signals were supplied. HTTP 401.')])
-        observed = ai.validate_analysis(result, [enriched])['groups'][0]['observation']
+        result = dict(self.result, evidenceHash=ai.fingerprint([enriched]), groups=[dict(self.entry, category='storefront', observation='No error signals were supplied. HTTP 401.')])
+        group = ai.validate_analysis(result, [enriched])['groups'][0]
+        self.assertEqual(group['category'], 'unknown')
+        observed = group['observation']
         self.assertIn('HTTP 200', observed)
         self.assertIn('Unauthorized token.', observed)
         self.assertNotIn('401', observed)

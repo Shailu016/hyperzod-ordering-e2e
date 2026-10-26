@@ -262,7 +262,7 @@ def analysis_html(data, case_id=None):
         return ''
     body = '<section class="notice"><h2>AI explanation · advisory</h2><p class="muted">Based on limited diagnostic facts. Screenshots and videos were not sent to AI. Possible causes are unconfirmed; test results are unchanged.</p>'
     for group in groups:
-        assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
+        assessment = 'Cause unconfirmed' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
         body += '<article><h3>' + esc(' / '.join(DEVICES[name] for name in group['devices'])) + ' · ' + esc(assessment) + '</h3>'
         cases = [item for item in data.get('failures', []) if item['id'] in group['failureIds']]
         for item in cases:

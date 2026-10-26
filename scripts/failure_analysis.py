@@ -362,6 +362,10 @@ def validate_analysis(value, failures=None, key=''):
         # Case association comes exclusively from our evidence, not the model.
         item = {name: group[name] for name in ('id', 'devices', 'failureIds')}
         item['category'] = entry['category']
+        if group['facts'].get('intent') == 'sign_in_and_logout' and group['facts'].get('failureKind') == 'diagnostic-guard' and 'AUTH_TOKEN_UNAUTHORIZED' in group['facts'].get('signals', []):
+            # Without a logout marker the same rejection could be a late request,
+            # session invalidation, or an auth defect. Do not assign component fault.
+            item['category'] = 'unknown'
         for name in ('observation', 'possibleCause', 'nextCheck'):
             if not isinstance(entry.get(name), str) or not entry[name].strip() or len(entry[name]) > 600:
                 raise ValueError('Invalid AI explanation text')
