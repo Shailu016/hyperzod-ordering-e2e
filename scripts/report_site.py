@@ -1,5 +1,6 @@
 """Build portable public report bundles. Never copies the raw result/auth directory."""
 import argparse
+import base64
 import hashlib
 import html
 import importlib.util
@@ -100,6 +101,33 @@ def cases(suites, parents=()):
         yield from cases(suite.get('suites', []), ancestors)
 
 
+def technical_facts(item, test, project_dir):
+    results = test.get('results', [])
+    result = next((value for value in reversed(results) if value.get('status') in ('failed', 'timedOut', 'interrupted')), results[-1] if results else {})
+    diagnostics = {}
+    attachment = next((value for value in result.get('attachments', []) if value.get('name') == 'api-diagnostics'), None)
+    if attachment:
+        try:
+            if isinstance(attachment.get('body'), str) and len(attachment['body']) <= 350000:
+                raw = base64.b64decode(attachment['body'], validate=True)
+            elif attachment.get('path'):
+                path = attachment_file(project_dir, attachment['path'])
+                if path.stat().st_size > 262144:
+                    raise ValueError('Oversized diagnostics')
+                raw = path.read_bytes()
+            else:
+                raw = b'{}'
+            if len(raw) > 262144:
+                raise ValueError('Oversized diagnostics')
+            diagnostics = json.loads(raw)
+        except (OSError, ValueError, TypeError):
+            # Preserve original report delivery; never follow escaped paths or
+            # forward unparsed diagnostics to the model.
+            diagnostics = {}
+    errors = result.get('errors', [])
+    return failure_analysis.captured_facts(item, errors if isinstance(errors, list) else [], diagnostics)
+
+
 def prepare(input_dir, output_dir, source, now=None):
     now = now or datetime.now(timezone.utc)
     input_dir, output_dir = Path(input_dir).resolve(), Path(output_dir).resolve()
@@ -164,6 +192,7 @@ def prepare(input_dir, output_dir, source, now=None):
             error = recorded.get('error') or 'Open the Playwright report for assertion details'
             state = 'flaky' if test['status'] == 'flaky' else 'failed'
             item = {'id': case_id, 'project': name, 'title': spec.get('title', 'Failed scenario'), 'status': state, 'error': error[:6000], 'path': 'failures/' + case_id + '.html'}
+            item['technicalFacts'] = technical_facts(item, test, project_dir)
             if has_native:
                 item['nativePath'] = 'devices/' + name + '/#?q=s:' + state
             for result in reversed(test.get('results', [])):
@@ -198,7 +227,7 @@ def prepare(input_dir, output_dir, source, now=None):
     if analysis['status'] in ('complete', 'unavailable'):
         metadata['failureAnalysis'] = analysis
         summary['failureAnalysis'] = analysis
-        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error')} for item in details]
+        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error', 'technicalFacts')} for item in details]
     write_json(run_root / 'manifest.json', metadata)
     render_run(run_root, metadata)
     if sum(entry.stat().st_size for entry in run_root.rglob('*') if entry.is_file()) > MAX_BUNDLE_BYTES:
@@ -235,6 +264,12 @@ def analysis_html(data, case_id=None):
     for group in groups:
         assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
         body += '<article><h3>' + esc(' / '.join(DEVICES[name] for name in group['devices'])) + ' · ' + esc(assessment) + '</h3>'
+        cases = [item for item in data.get('failures', []) if item['id'] in group['failureIds']]
+        for item in cases:
+            body += '<p><strong>Case:</strong> ' + esc(item['title'])
+            if re.fullmatch(r'failures/[a-f0-9]{20}\.html', item.get('path', '')):
+                body += ' · <a href="' + ('../' if case_id else '') + esc(item['path']) + '">Inspect evidence</a>'
+            body += '</p>'
         body += '<p><strong>Observation:</strong> ' + esc(group['observation']) + '</p><p><strong>Possible cause:</strong> ' + esc(group['possibleCause']) + '</p><p><strong>Next check:</strong> ' + esc(group['nextCheck']) + '</p></article>'
     if case_id is None:
         covered = sum(len(group['failureIds']) for group in groups)
@@ -260,8 +295,14 @@ def render_run(root, data):
         body += '</article>'
     body += '</div>' + analysis_html(data) + '<h2 id="failures">Failed cases</h2>'
     for item in data['failures']:
-        body += '<article class="card"><strong>' + esc(DEVICES[item['project']]) + ' · ' + esc(item['title']) + '</strong><pre>' + esc(item['error'][:1000]) + '</pre><a class="button" href="' + esc(item['path']) + '">Inspect failure</a></article>'
+        observed = failure_analysis.observation_for(failure_analysis.facts_for(item), [item['project']])
+        body += '<article class="card"><strong>' + esc(DEVICES[item['project']]) + ' · ' + esc(item['title']) + '</strong>'
+        if observed:
+            body += '<p><strong>Observed:</strong> ' + esc(observed) + '</p>'
+        body += '<pre>' + esc(item['error'][:1000]) + '</pre><a class="button" href="' + esc(item['path']) + '">Inspect failure</a></article>'
         content = '<p><a href="../index.html#failures">← Failed cases</a></p><h1>' + esc(item['title']) + '</h1><p>' + esc(DEVICES[item['project']]) + ' · ' + esc(ist(data['finishedAt'])) + '</p><pre>' + esc(item['error']) + '</pre>'
+        if observed:
+            content += '<p><strong>Observed:</strong> ' + esc(observed) + '</p>'
         content += analysis_html(data, item['id'])
         for kind in ('screenshot', 'video'):
             if kind in item:

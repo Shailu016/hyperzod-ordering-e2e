@@ -174,7 +174,8 @@ def build_payload(summary, context):
         blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '*Failed cases*'}})
         for index, item in enumerate(publication['failures'][:3]):
             device = {'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS'}.get(item.get('project'), item.get('project', '?'))
-            message = f"*{index + 1}. {clean(device, 40)} · {clean(item.get('title'), 180)}*\n{clean(str(item.get('error', '')).split(chr(10) + chr(10))[0], 220)}\n<{item['url']}|Inspect failure>"
+            observed = failure_analysis.observation_for(failure_analysis.facts_for(item), [item.get('project')])
+            message = f"*{index + 1}. {clean(device, 40)} · {clean(item.get('title'), 180)}*\n{clean(observed or str(item.get('error', '')).split(chr(10) + chr(10))[0], 350)}\n<{item['url']}|Inspect failure>"
             if item.get('screenshotUrl'):
                 message += f" · <{item['screenshotUrl']}|View screenshot>"
             if item.get('videoUrl'):
@@ -200,7 +201,12 @@ def build_payload(summary, context):
             for group in analysis['groups'][:3]:
                 devices = ' / '.join({'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS', 'setup': 'Signup'}[name] for name in group['devices'])
                 assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
-                text = f"*{clean(devices, 80)} · {clean(assessment, 60)}*\n*Observation:* {clean(group['observation'], 350)}\n*Possible cause:* {clean(group['possibleCause'], 350)}\n*Next check:* {clean(group['nextCheck'], 350)}"
+                evidence = [item for item in summary.get('analysisEvidence', []) if item.get('id') in group['failureIds']]
+                titles = list(dict.fromkeys(clean(item.get('title', ''), 180) for item in evidence))
+                cases = '\n*Case:* ' + '; '.join(titles[:2]) if titles else ''
+                links = [item for item in (publication['failures'] if publication and publication['verified'] else []) if item['id'] in group['failureIds']]
+                evidence_link = '\n' + ' · '.join('<' + item['url'] + '|Inspect evidence>' for item in links[:2]) if links else ''
+                text = f"*{clean(devices, 80)} · {clean(assessment, 60)}*{cases}\n*Observation:* {clean(group['observation'], 350)}\n*Possible cause:* {clean(group['possibleCause'], 350)}\n*Next check:* {clean(group['nextCheck'], 350)}{evidence_link}"
                 blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}})
             if len(analysis['groups']) > 3:
                 blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'More AI explanations are available in the full report.'}]})

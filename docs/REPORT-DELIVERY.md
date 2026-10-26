@@ -175,6 +175,25 @@ Untrusted execution artifacts cannot supply their own analysis. HTML/Slack
 renderers escape provider text and never expose raw provider errors or keys.
 The explanation follows the same 3/14-day report retention without entering Git.
 
+Explanation input includes allowlisted facts from the actual failed attempt's
+full assertion and `api-diagnostics` attachment, rather than only the shortened
+Slack error. Inline and file-based diagnostic attachments are bounded and kept
+inside their report directory. Only known routes, messages, event kinds,
+methods, statuses, severity and event order are retained. Raw logs, headers,
+request bodies, dynamic identifiers and media remain excluded from the AI call.
+An HTTP200 application-level rejection is reported as such; an auth message
+never invents an HTTP401. A post-test diagnostic-guard failure is distinguished
+from a failed UI assertion. Event order does not prove its timing relative to
+logout when no logout marker was captured.
+
+Structured model output must use the submitted case groups and allowed
+categories. Observations with captured API evidence are rendered from those
+facts, so a model cannot replace them with an invented response status or a
+claim that no details were supplied. Possible causes remain unconfirmed. Each
+explanation identifies its case and links to verified failure evidence. A
+factual observation remains visible if AI times out, hits quota, or returns an
+invalid response. The 60-second deadline and unchanged test outcomes still apply.
+
 Offline checks: `python -m unittest discover -s tests-unit -p '*_test.py'`.
 These include a real stuck-child termination check, privacy allowlisting,
 cross-case identity rejection and end-to-end HTML/Slack rendering with mocks.
