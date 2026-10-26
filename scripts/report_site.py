@@ -1,5 +1,6 @@
 """Build portable public report bundles. Never copies the raw result/auth directory."""
 import argparse
+import base64
 import hashlib
 import html
 import importlib.util
@@ -100,6 +101,33 @@ def cases(suites, parents=()):
         yield from cases(suite.get('suites', []), ancestors)
 
 
+def technical_facts(item, test, project_dir):
+    results = test.get('results', [])
+    result = next((value for value in reversed(results) if value.get('status') in ('failed', 'timedOut', 'interrupted')), results[-1] if results else {})
+    diagnostics = {}
+    attachment = next((value for value in result.get('attachments', []) if value.get('name') == 'api-diagnostics'), None)
+    if attachment:
+        try:
+            if isinstance(attachment.get('body'), str) and len(attachment['body']) <= 350000:
+                raw = base64.b64decode(attachment['body'], validate=True)
+            elif attachment.get('path'):
+                path = attachment_file(project_dir, attachment['path'])
+                if path.stat().st_size > 262144:
+                    raise ValueError('Oversized diagnostics')
+                raw = path.read_bytes()
+            else:
+                raw = b'{}'
+            if len(raw) > 262144:
+                raise ValueError('Oversized diagnostics')
+            diagnostics = json.loads(raw)
+        except (OSError, ValueError, TypeError):
+            # Preserve original report delivery; never follow escaped paths or
+            # forward unparsed diagnostics to the model.
+            diagnostics = {}
+    errors = result.get('errors', [])
+    return failure_analysis.captured_facts(item, errors if isinstance(errors, list) else [], diagnostics)
+
+
 def prepare(input_dir, output_dir, source, now=None):
     now = now or datetime.now(timezone.utc)
     input_dir, output_dir = Path(input_dir).resolve(), Path(output_dir).resolve()
@@ -164,6 +192,7 @@ def prepare(input_dir, output_dir, source, now=None):
             error = recorded.get('error') or 'Open the Playwright report for assertion details'
             state = 'flaky' if test['status'] == 'flaky' else 'failed'
             item = {'id': case_id, 'project': name, 'title': spec.get('title', 'Failed scenario'), 'status': state, 'error': error[:6000], 'path': 'failures/' + case_id + '.html'}
+            item['technicalFacts'] = technical_facts(item, test, project_dir)
             if has_native:
                 item['nativePath'] = 'devices/' + name + '/#?q=s:' + state
             for result in reversed(test.get('results', [])):
@@ -191,6 +220,9 @@ def prepare(input_dir, output_dir, source, now=None):
                     item[kind] = relative
             details.append(item)
     metadata = {key: summary.get(key) for key in ('suite', 'status', 'counts', 'projects', 'origin', 'startedAt', 'finishedAt')}
+    lock = notifier.lease_explanation(summary)
+    if lock:
+        metadata['executionIssue'] = lock
     # Publish only selected summary fields, not raw reports or runner filesystem paths.
     metadata['projects'] = [{key: item.get(key) for key in ('project', 'status', 'counts', 'critical', 'warnings')} for item in summary.get('projects', [])]
     metadata.update({'schemaVersion': 1, 'runKey': run_key, 'sourceRunId': run_id, 'sourceAttempt': attempt, 'sourceSha': source.get('head_sha', ''), 'runNumber': source.get('run_number', ''), 'sourceUrl': source.get('html_url', ''), 'expiresAt': iso(expires), 'retentionDays': days, 'failures': details, 'warnings': warnings})
@@ -198,7 +230,7 @@ def prepare(input_dir, output_dir, source, now=None):
     if analysis['status'] in ('complete', 'unavailable'):
         metadata['failureAnalysis'] = analysis
         summary['failureAnalysis'] = analysis
-        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error')} for item in details]
+        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error', 'technicalFacts')} for item in details]
     write_json(run_root / 'manifest.json', metadata)
     render_run(run_root, metadata)
     if sum(entry.stat().st_size for entry in run_root.rglob('*') if entry.is_file()) > MAX_BUNDLE_BYTES:
@@ -233,8 +265,14 @@ def analysis_html(data, case_id=None):
         return ''
     body = '<section class="notice"><h2>AI explanation · advisory</h2><p class="muted">Based on limited diagnostic facts. Screenshots and videos were not sent to AI. Possible causes are unconfirmed; test results are unchanged.</p>'
     for group in groups:
-        assessment = 'Cause unknown' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
+        assessment = 'Cause unconfirmed' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
         body += '<article><h3>' + esc(' / '.join(DEVICES[name] for name in group['devices'])) + ' · ' + esc(assessment) + '</h3>'
+        cases = [item for item in data.get('failures', []) if item['id'] in group['failureIds']]
+        for item in cases:
+            body += '<p><strong>Case:</strong> ' + esc(item['title'])
+            if re.fullmatch(r'failures/[a-f0-9]{20}\.html', item.get('path', '')):
+                body += ' · <a href="' + ('../' if case_id else '') + esc(item['path']) + '">Inspect evidence</a>'
+            body += '</p>'
         body += '<p><strong>Observation:</strong> ' + esc(group['observation']) + '</p><p><strong>Possible cause:</strong> ' + esc(group['possibleCause']) + '</p><p><strong>Next check:</strong> ' + esc(group['nextCheck']) + '</p></article>'
     if case_id is None:
         covered = sum(len(group['failureIds']) for group in groups)
@@ -244,11 +282,17 @@ def analysis_html(data, case_id=None):
 
 def render_run(root, data):
     title = 'Ordering ' + str(data.get('suite') or 'test run')
-    body = '<p class="muted">ORDERING AUTOMATION · RUN EVIDENCE</p><h1>' + esc(title) + '</h1><p class="badge ' + esc(data['status']) + '">' + esc(data['status'].replace('-', ' ').title()) + '</p><p class="counts">' + esc(count_text(data.get('counts') or {})) + '</p>'
+    lock = data.get('executionIssue')
+    result_text = 'Tests did not start · Test account locked' if lock else count_text(data['counts']) if data.get('counts') else 'No complete test report available'
+    body = '<p class="muted">ORDERING AUTOMATION · RUN EVIDENCE</p><h1>' + esc(title) + '</h1><p class="badge ' + esc(data['status']) + '">' + esc(data['status'].replace('-', ' ').title()) + '</p><p class="counts">' + esc(result_text) + '</p>'
+    if lock:
+        body += '<section class="notice"><h2>Account lock prevented execution</h2><p>' + esc(lock['explanation']) + '</p><p>Blocking ' + esc(lock['source']) + ' run: <code>' + esc(lock['owner']) + '</code><br>Acquired ' + esc(lock['acquiredIST']) + '<br>Lease: <code>' + esc(lock['ref']) + '</code></p><p>' + esc(lock['nextCheck']) + '</p></section>'
     body += '<p>' + esc(ist(data['finishedAt'])) + ' · Source <code>' + esc(data.get('sourceSha', '')[:7]) + '</code> · Run <code>' + esc(data['runKey']) + '</code></p>'
     if data.get('origin'):
         body += '<p class="muted">Target: <code>' + esc(data['origin']) + '</code></p>'
-    body += '<p class="muted">Evidence expires ' + esc(ist(data['expiresAt'])) + '. Retention: ' + str(data['retentionDays']) + ' days.</p><nav><a class="button" href="../../">Report history</a><a class="button" href="#failures">Failed / flaky cases</a>'
+    body += '<p class="muted">Evidence expires ' + esc(ist(data['expiresAt'])) + '. Retention: ' + str(data['retentionDays']) + ' days.</p><nav><a class="button" href="../../">Report history</a>'
+    if not lock:
+        body += '<a class="button" href="#failures">Failed / flaky cases</a>'
     if re.fullmatch(r'https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+', data.get('sourceUrl', '')):
         body += '<a class="button" href="' + esc(data['sourceUrl']) + '">GitHub run</a>'
     body += '</nav><div class="cards">'
@@ -258,10 +302,18 @@ def render_run(root, data):
         if (root / 'devices' / name / 'index.html').is_file():
             body += '<a class="button" href="devices/' + esc(name) + '/">Open Playwright report</a>'
         body += '</article>'
-    body += '</div>' + analysis_html(data) + '<h2 id="failures">Failed cases</h2>'
+    body += '</div>' + analysis_html(data)
+    if not lock:
+        body += '<h2 id="failures">Failed cases</h2>'
     for item in data['failures']:
-        body += '<article class="card"><strong>' + esc(DEVICES[item['project']]) + ' · ' + esc(item['title']) + '</strong><pre>' + esc(item['error'][:1000]) + '</pre><a class="button" href="' + esc(item['path']) + '">Inspect failure</a></article>'
+        observed = failure_analysis.observation_for(failure_analysis.facts_for(item), [item['project']])
+        body += '<article class="card"><strong>' + esc(DEVICES[item['project']]) + ' · ' + esc(item['title']) + '</strong>'
+        if observed:
+            body += '<p><strong>Observed:</strong> ' + esc(observed) + '</p>'
+        body += '<pre>' + esc(item['error'][:1000]) + '</pre><a class="button" href="' + esc(item['path']) + '">Inspect failure</a></article>'
         content = '<p><a href="../index.html#failures">← Failed cases</a></p><h1>' + esc(item['title']) + '</h1><p>' + esc(DEVICES[item['project']]) + ' · ' + esc(ist(data['finishedAt'])) + '</p><pre>' + esc(item['error']) + '</pre>'
+        if observed:
+            content += '<p><strong>Observed:</strong> ' + esc(observed) + '</p>'
         content += analysis_html(data, item['id'])
         for kind in ('screenshot', 'video'):
             if kind in item:
@@ -279,7 +331,7 @@ def render_run(root, data):
         target = root / item['path']
         target.parent.mkdir(exist_ok=True)
         target.write_text(page(item['title'], content), encoding='utf-8')
-    if not data['failures']:
+    if not data['failures'] and not lock:
         body += '<p>No failed case details recorded for this run.</p>'
     for warning in data.get('warnings', []):
         body += '<p class="notice">' + esc(warning) + '</p>'
@@ -316,7 +368,8 @@ def assemble(bundles, destination, now=None):
     if records:
         body += '<nav><a class="button" href="runs/' + esc(records[0]['runKey']) + '/">Latest report</a></nav>'
     for record in records:
-        body += '<article class="card"><a href="runs/' + esc(record['runKey']) + '/"><strong>' + esc(record.get('suite', 'run')) + ' · ' + esc(record['status']) + ' · ' + esc(ist(record['finishedAt'])) + '</strong></a><p>' + esc(count_text(record.get('counts') or {})) + '</p></article>'
+        result_text = 'Tests did not start · Test account locked' if record.get('executionIssue') else count_text(record['counts']) if record.get('counts') else 'No complete test report available'
+        body += '<article class="card"><a href="runs/' + esc(record['runKey']) + '/"><strong>' + esc(record.get('suite', 'run')) + ' · ' + esc(record['status']) + ' · ' + esc(ist(record['finishedAt'])) + '</strong></a><p>' + esc(result_text) + '</p></article>'
     if not records:
         body += '<p>No retained reports are available.</p>'
     (destination / 'index.html').write_text(page('Ordering test reports', body), encoding='utf-8')

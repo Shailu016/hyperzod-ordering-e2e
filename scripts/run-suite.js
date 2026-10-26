@@ -35,8 +35,7 @@ async function run(suite = process.argv[2]) {
   try {
     const origin = assertAllowedTarget(process.env.BASE_URL, process.env.E2E_ALLOWED_ORIGINS);
     initial.origin = origin;
-    if (process.env.E2E_ISOLATED_IDENTITY === 'true') {
-      if (process.env.GITHUB_ACTIONS === 'true') throw new Error('Isolated identity is a local validation option');
+    if (require('../utils/isolated-identity').useIsolatedIdentity()) {
       const identity = require('../utils/isolated-identity').isolatedIdentity(process.env.TEST_USER_EMAIL);
       process.env.TEST_USER_EMAIL = identity.email;
       process.env.TEST_USER_PHONE = identity.phone;
@@ -73,7 +72,9 @@ async function run(suite = process.argv[2]) {
     writeSummary({ ...summary, finishedAt: new Date().toISOString() });
     process.exitCode = summary.status === 'passed' ? 0 : 1;
   } catch (error) {
-    writeSummary({ ...initial, outcomes, status: 'infrastructure-failed', error: error.message, finishedAt: new Date().toISOString() });
+    writeSummary({ ...initial, outcomes, status: 'infrastructure-failed', error: error.message,
+      ...(error.code === 'identity-lease-conflict' ? { errorCode: error.code, leaseConflict: error.leaseConflict, testsStarted: false } : {}),
+      finishedAt: new Date().toISOString() });
     throw error;
   } finally {
     try {

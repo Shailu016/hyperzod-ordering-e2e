@@ -13,6 +13,24 @@ spec.loader.exec_module(notifier)
 
 
 class NotificationTests(unittest.TestCase):
+    def test_lock_conflict_explains_owner_and_no_tests_without_posting(self):
+        summary = {'status': 'infrastructure-failed', 'suite': 'all', 'errorCode': 'identity-lease-conflict', 'testsStarted': False,
+                   'leaseConflict': {'ref': 'e2e-lease-' + 'a' * 24, 'sha': 'b' * 40, 'owner': 'local-run-123', 'source': 'local', 'acquiredAt': '2026-10-25T18:48:29.831Z', 'private': 'must-not-publish'}}
+        notifier.validate_summary(summary)
+        with patch.object(notifier, 'deliver') as send:
+            rendered = json.dumps(notifier.build_payload(summary, {}))
+            for expected in ('Test account locked', 'Tests did not start', 'local-run-123', '26 Oct 2026', '12:18:29 AM IST', 'LEASE-RECOVERY.md'):
+                self.assertIn(expected, rendered)
+            for misleading in ('0 passed', 'No complete test report available', 'AI explanation', 'must-not-publish'):
+                self.assertNotIn(misleading, rendered)
+            send.assert_not_called()
+        for change in ({'testsStarted': True}, {'counts': {'passed': 1}}, {'outcomes': [{'project': 'web'}]}, {'status': 'passed'}):
+            with self.assertRaises(ValueError):
+                notifier.validate_summary({**summary, **change})
+        for change in ({'owner': 'email@example.invalid'}, {'acquiredAt': 'not-a-time'}, {'source': 'github', 'githubRunId': '../bad'}):
+            with self.assertRaises(ValueError):
+                notifier.validate_summary({**summary, 'leaseConflict': {**summary['leaseConflict'], **change}})
+
     def test_full_suite_has_a_clear_slack_label_without_posting(self):
         payload = notifier.build_payload({'suite': 'all', 'status': 'passed', 'counts': {'passed': 80}}, {})
         self.assertIn('Ordering full', payload['blocks'][0]['text']['text'])

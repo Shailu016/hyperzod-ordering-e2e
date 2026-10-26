@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const ref = 'e2e-lease-' + 'a'.repeat(24), sha = 'b'.repeat(40), mine = 'd'.repeat(40);
-function fixture({ active = false, changed = false, contend = false, rejectUpdate = false } = {}) {
+function fixture({ active = false, changed = false, contend = false, rejectUpdate = false, lostAck = false } = {}) {
   const calls = [], refs = new Map();
   const request = async (url, options) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
@@ -14,12 +14,14 @@ function fixture({ active = false, changed = false, contend = false, rejectUpdat
       data = { data: { updateRefs: { clientMutationId: null } } };
     } else if (url.endsWith('git/ref/heads/main')) data = { object: { sha } };
     else if (url.endsWith(`git/ref/tags/${ref}`)) { refs.set(`refs/tags/${ref}`, sha); data = { object: { sha } }; }
+    else if (/git\/ref\/tags\/e2e-lease-[a-f0-9]{24}$/.test(url)) data = { object: { sha: contend ? sha : mine } };
     else if (url.endsWith(`git/commits/${sha}`)) data = { tree: { sha: 'tree' }, message: JSON.stringify({ owner: 'run-123', acquiredAt: '2026-10-06T01:00:00Z', source: 'github', githubRunId: '123' }) };
     else if (url.endsWith('actions/runs/123')) data = { status: active ? 'in_progress' : 'completed' };
     else if (url.endsWith('git/commits') && options.method === 'POST') data = { sha: mine };
     else if (url.endsWith('git/refs') && options.method === 'POST') {
       if (contend) return { ok: false, status: 422 };
       refs.set(body.ref, body.sha);
+      if (lostAck) throw new Error('Response lost after creation');
     } else if (url.endsWith('/hyperzod-ordering-e2e')) data = { node_id: 'repository-id' };
     else assert.fail(`Unexpected API call: ${options.method} ${url}`);
     return { ok: true, status: 200, json: async () => data };

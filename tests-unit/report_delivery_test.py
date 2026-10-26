@@ -1,4 +1,5 @@
 import importlib.util
+import base64
 import hashlib
 import json
 import os
@@ -25,6 +26,80 @@ spec.loader.exec_module(notifier)
 
 
 class ReportDeliveryTests(unittest.TestCase):
+    def test_lock_conflict_report_has_diagnostics_without_fake_counts_or_media(self):
+        self.summary = {'runId': '123-fixture', 'status': 'infrastructure-failed', 'suite': 'all', 'finishedAt': self.finished, 'startedAt': self.finished,
+                        'errorCode': 'identity-lease-conflict', 'testsStarted': False,
+                        'leaseConflict': {'ref': 'e2e-lease-' + 'a' * 24, 'sha': 'b' * 40, 'owner': 'local-123', 'source': 'local', 'acquiredAt': '2026-10-25T18:48:29.831Z', 'private': 'must-not-publish'}}
+        report_site.write_json(self.input / 'summary.json', self.summary)
+        output, metadata = self.build()
+        root = output / 'bundle' / 'runs' / '123-2'
+        rendered = (root / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('Tests did not start', rendered)
+        self.assertIn('local-123', rendered)
+        self.assertIn('LEASE-RECOVERY.md', rendered)
+        self.assertNotIn('0 passed', rendered)
+        self.assertNotIn('must-not-publish', json.dumps(metadata))
+        self.assertEqual(metadata['failures'], [])
+        payload = notifier.build_payload(report_site.read_json(output / 'notification.json'), self.context(output))
+        text = json.dumps(payload)
+        self.assertIn('Open full report', text)
+        self.assertIn('Lock diagnostics in the report', text)
+        self.assertNotIn('Screenshots and videos in the report', text)
+        site = self.root / 'lock-history'
+        report_site.assemble([output / 'bundle'], site, self.now)
+        history = (site / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('Tests did not start', history)
+        self.assertNotIn('0 passed', history)
+
+    def test_ai_reads_inline_diagnostics_full_error_and_shows_actual_case_and_evidence(self):
+        fixture = json.loads((SCRIPTS.parent / 'tests-unit/fixtures/ai-auth-application-failure.json').read_text())
+        failure = fixture['failure']
+        spec = self.report['suites'][0]['specs'][0]
+        spec['title'] = failure['title']
+        result = spec['tests'][0]['results'][0]
+        result['status'] = 'failed'
+        result['errors'] = fixture['errors']
+        result['attachments'].append({'name': 'api-diagnostics', 'contentType': 'application/json', 'body': base64.b64encode(json.dumps(fixture['diagnostics']).encode()).decode()})
+        report_site.write_json(self.project / 'report.json', self.report)
+        self.summary['failedTests'][0].update(title=failure['title'], error=failure['error'])
+        report_site.write_json(self.input / 'summary.json', self.summary)
+        def explained(failures):
+            facts = failures[0]['technicalFacts']
+            self.assertEqual(facts['httpStatuses'], [200])
+            self.assertEqual(facts['apiMessage'], 'Unauthorized token.')
+            self.assertEqual(facts['failureKind'], 'diagnostic-guard')
+            self.assertEqual(facts['apiRoutes'], ['/auth/v1/me'])
+            groups = report_site.failure_analysis.evidence_groups(failures)
+            value = {'schemaVersion': 1, 'status': 'complete', 'provider': 'gemini', 'model': 'gemini-3.5-flash-lite',
+                'evidenceHash': report_site.failure_analysis.fingerprint(failures), 'groups': [dict(group,
+                category='unknown', observation='No specific signals supplied; HTTP401.', possibleCause='Token validity or request timing needs investigation.', nextCheck='Compare the session-check request with logout completion.') for group in groups]}
+            return report_site.failure_analysis.validate_analysis(value, failures)
+        with patch.object(report_site.failure_analysis, 'analyze', side_effect=explained):
+            output, metadata = self.build()
+        root = output / 'bundle' / 'runs' / '123-2'
+        rendered = (root / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('HTTP 200', rendered)
+        self.assertIn('Unauthorized token.', rendered)
+        self.assertIn(failure['title'], rendered)
+        self.assertIn('Inspect evidence', rendered)
+        summary = report_site.read_json(output / 'notification.json')
+        self.assertIn('technicalFacts', summary['analysisEvidence'][0])
+        payload = notifier.build_payload(summary, self.context(output))
+        text = json.dumps(payload)
+        self.assertIn('HTTP 200', text)
+        self.assertIn('Unauthorized token.', text)
+        self.assertIn(failure['title'], text)
+        self.assertIn('Inspect evidence', text)
+        self.assertNotIn('HTTP401', text)
+        with patch.object(report_site.failure_analysis, 'analyze', return_value={'schemaVersion': 1, 'status': 'unavailable', 'reason': 'quota'}):
+            fallback_output, fallback_metadata = self.build('quota-fallback')
+        fallback_root = fallback_output / 'bundle' / 'runs' / '123-2'
+        self.assertIn('HTTP 200', (fallback_root / 'index.html').read_text(encoding='utf-8'))
+        fallback_payload = notifier.build_payload(report_site.read_json(fallback_output / 'notification.json'), self.context(fallback_output))
+        self.assertIn('HTTP 200', json.dumps(fallback_payload))
+        self.assertIn('provider quota reached', json.dumps(fallback_payload))
+        self.assertEqual(fallback_metadata['counts'], self.summary['counts'])
+
     def test_optional_ai_reaches_html_and_slack_without_changing_result(self):
         def explained(failures):
             groups = report_site.failure_analysis.evidence_groups(failures)

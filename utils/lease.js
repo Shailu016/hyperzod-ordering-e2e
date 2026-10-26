@@ -13,7 +13,10 @@ function leaseAPI({ repository = 'Shailu016/hyperzod-ordering-e2e', token = reso
       method, headers,
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20_000),
     });
-    if (!response.ok) throw new Error(`Identity lease ${method} failed (HTTP ${response.status}); ${endpoint === 'git/refs' && response.status === 422 ? 'another runner may own this test account; inspect the lease before recovering it' : 'inspect token permissions and API availability'}`);
+    if (!response.ok) {
+      const error = Object.assign(new Error(`Identity lease ${method} failed (HTTP ${response.status}); inspect token permissions, API availability and lease state`), { status: response.status });
+      throw error;
+    }
     return response.status === 204 ? null : response.json();
   };
   return Object.assign(api, { updateRefs: async (refUpdates) => {
@@ -36,7 +39,25 @@ async function acquireLease({ origin, email, owner, ...options }) {
   const metadata = { owner, acquiredAt: new Date().toISOString(), source: process.env.GITHUB_ACTIONS === 'true' ? 'github' : 'local', githubRunId: process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_RUN_ID : undefined };
   const commit = await api('git/commits', 'POST', { tree: base.tree.sha, parents: [head.object.sha], message: JSON.stringify(metadata) });
   try { await api('git/refs', 'POST', { ref: `refs/${ref}`, sha: commit.sha }); }
-  catch (error) { throw new Error(`${error.message}. Lease: ${ref.slice(5)}; see docs/LEASE-RECOVERY.md`); }
+  catch (error) {
+    // A POST can succeed even if its acknowledgement is lost. Only an exact SHA
+    // match proves that this invocation acquired ownership; never retry mutations.
+    let current;
+    try { current = await api(`git/ref/${ref}`); } catch { /* preserve the original acquisition failure */ }
+    if (current?.object?.sha !== commit.sha) {
+      const failure = Object.assign(new Error(`${error.message}. Lease: ${ref.slice(5)}; see docs/LEASE-RECOVERY.md`), { code: '', leaseConflict: undefined });
+      if (/^[a-f0-9]{40}$/.test(current?.object?.sha || '')) {
+        let held;
+        try { held = JSON.parse((await api(`git/commits/${current.object.sha}`)).message); } catch { /* unverified ownership */ }
+        if (/^[A-Za-z0-9_-]{1,100}$/.test(held?.owner || '') && ['local', 'github'].includes(held.source) && Number.isFinite(Date.parse(held.acquiredAt)) && (held.source !== 'github' || /^\d{1,30}$/.test(held.githubRunId || ''))) {
+          failure.code = 'identity-lease-conflict';
+          failure.leaseConflict = { ref: ref.slice(5), sha: current.object.sha, owner: held.owner, source: held.source, acquiredAt: new Date(held.acquiredAt).toISOString(), ...(held.source === 'github' ? { githubRunId: held.githubRunId } : {}) };
+          failure.message = 'Tests did not start: another runner holds the test account lock. Verify the owner is inactive and reconcile resources before recovery; see docs/LEASE-RECOVERY.md';
+        }
+      }
+      throw failure;
+    }
+  }
   let released = false;
   return async () => {
     if (released) return;

@@ -2,6 +2,12 @@
 
 The identity lease is a Git tag named `e2e-lease-<24 hex characters>`. A failed process can leave it behind. Never delete a lease by age alone: the owner may still be mutating the shared account.
 
+Local managed runs now use distinct email/phone identities by default, so their locks do not block the scheduled account. `E2E_ISOLATED_IDENTITY=false` explicitly opts a local run into the shared identity. Interrupted isolated runs still require resource reconciliation; isolation is not proof of cleanup.
+
+A confirmed conflict reports **Test account locked / Tests did not start**, with the blocking owner, source, acquisition time in IST, and exact lease. A lock request failure without verified ownership stays an infrastructure/API error. There are no test screenshots or videos when acquisition prevents tests from starting. Check the owning run rather than rerunning the blocked suite or replaying account mutations.
+
+For a local owner, inspect `test-results/<owner>/summary.json` and `.auth/<owner>-<project>/manifest.json` on its host, and confirm no runner or Playwright child remains active. A summary stuck at `running` is evidence of interruption, not proof the process is inactive. `setup-started` without a user ID does not prove the account is absent. Use the existing cleanup project under the same owner and identity to obtain `absent-proven` or `deleted-and-proven`; inspect all recorded orders and any submission attempt before recovery. Never create a replacement account or place another order merely to recover a lock.
+
 First inspect the exact tag. This is read-only and requires an authenticated `gh` CLI or `E2E_LEASE_TOKEN`:
 
 ```powershell
