@@ -26,6 +26,31 @@ spec.loader.exec_module(notifier)
 
 
 class ReportDeliveryTests(unittest.TestCase):
+    def test_lock_conflict_report_has_diagnostics_without_fake_counts_or_media(self):
+        self.summary = {'runId': '123-fixture', 'status': 'infrastructure-failed', 'suite': 'all', 'finishedAt': self.finished, 'startedAt': self.finished,
+                        'errorCode': 'identity-lease-conflict', 'testsStarted': False,
+                        'leaseConflict': {'ref': 'e2e-lease-' + 'a' * 24, 'sha': 'b' * 40, 'owner': 'local-123', 'source': 'local', 'acquiredAt': '2026-10-25T18:48:29.831Z', 'private': 'must-not-publish'}}
+        report_site.write_json(self.input / 'summary.json', self.summary)
+        output, metadata = self.build()
+        root = output / 'bundle' / 'runs' / '123-2'
+        rendered = (root / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('Tests did not start', rendered)
+        self.assertIn('local-123', rendered)
+        self.assertIn('LEASE-RECOVERY.md', rendered)
+        self.assertNotIn('0 passed', rendered)
+        self.assertNotIn('must-not-publish', json.dumps(metadata))
+        self.assertEqual(metadata['failures'], [])
+        payload = notifier.build_payload(report_site.read_json(output / 'notification.json'), self.context(output))
+        text = json.dumps(payload)
+        self.assertIn('Open full report', text)
+        self.assertIn('Lock diagnostics in the report', text)
+        self.assertNotIn('Screenshots and videos in the report', text)
+        site = self.root / 'lock-history'
+        report_site.assemble([output / 'bundle'], site, self.now)
+        history = (site / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('Tests did not start', history)
+        self.assertNotIn('0 passed', history)
+
     def test_ai_reads_inline_diagnostics_full_error_and_shows_actual_case_and_evidence(self):
         fixture = json.loads((SCRIPTS.parent / 'tests-unit/fixtures/ai-auth-application-failure.json').read_text())
         failure = fixture['failure']

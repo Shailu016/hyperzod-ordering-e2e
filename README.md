@@ -8,7 +8,8 @@ See [HARDENING.md](HARDENING.md) for safety, leases, reporting, scheduling and a
 Run `npm ci` and copy `.env.example` to `.env`. GitHub uses the repository's existing `E2E_*` secrets.
 The default allowed target is `https://automations-store.hyperzod.me`; other test origins require explicit `E2E_ALLOWED_ORIGINS`.
 Run `npm run check:env` before live execution. Local live runs require an authenticated `gh` CLI;
-Bitbucket requires `E2E_LEASE_TOKEN` with repository contents read/write. All runners coordinate the shared identity.
+Bitbucket requires `E2E_LEASE_TOKEN` with repository contents read/write. Every runner leases its selected identity.
+Local managed runs generate a distinct email/phone by default; GitHub Actions keeps the configured scheduled identity.
 If a runner crashes, inspect and recover its exact lease only by following [docs/LEASE-RECOVERY.md](docs/LEASE-RECOVERY.md).
 
 ## Offline verification
@@ -24,7 +25,7 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 The full suite continues through all requested devices, preserves their reports, and returns aggregate failure status.
 Use `npm run report -- web` to inspect one device's report. Direct unmanaged live Playwright runs are blocked.
 
-To validate locally with a distinct test email/phone while preserving `.env`:
+Local validation uses a distinct test email/phone while preserving `.env`:
 
 ```powershell
 $env:E2E_ISOLATED_IDENTITY = 'true'
@@ -36,6 +37,7 @@ npm run test:smoke
 The runner does not send notifications. `E2E_NOTIFICATIONS_DISABLED=true` also blocks the standalone notifier.
 `E2E_ENV_FILE` can select an existing private env file without copying it into another checkout.
 Missing cleanup proof or an ambiguous order stops subsequent devices and retains the lease for audited reconciliation.
+Set `E2E_ISOLATED_IDENTITY=false` locally only when deliberately testing the shared account; an interrupted run can block scheduled executions until recovery. Isolation does not replace cleanup: inspect an interrupted local run's `.auth/<runId>-<project>/manifest.json`, reconcile any account/orders, and recover its exact lease through the runbook. Never delete a lock merely because it is old.
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.
 When the server reports half or less of its per-minute request allowance remaining, the next scenario waits for the reset (or a full minute when no reset is supplied). This pacing preserves capacity for a complete user journey without hiding API failures. Invalid cooldown evidence stops the next scenario.
 

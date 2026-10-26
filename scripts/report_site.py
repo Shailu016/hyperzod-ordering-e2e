@@ -220,6 +220,9 @@ def prepare(input_dir, output_dir, source, now=None):
                     item[kind] = relative
             details.append(item)
     metadata = {key: summary.get(key) for key in ('suite', 'status', 'counts', 'projects', 'origin', 'startedAt', 'finishedAt')}
+    lock = notifier.lease_explanation(summary)
+    if lock:
+        metadata['executionIssue'] = lock
     # Publish only selected summary fields, not raw reports or runner filesystem paths.
     metadata['projects'] = [{key: item.get(key) for key in ('project', 'status', 'counts', 'critical', 'warnings')} for item in summary.get('projects', [])]
     metadata.update({'schemaVersion': 1, 'runKey': run_key, 'sourceRunId': run_id, 'sourceAttempt': attempt, 'sourceSha': source.get('head_sha', ''), 'runNumber': source.get('run_number', ''), 'sourceUrl': source.get('html_url', ''), 'expiresAt': iso(expires), 'retentionDays': days, 'failures': details, 'warnings': warnings})
@@ -279,11 +282,17 @@ def analysis_html(data, case_id=None):
 
 def render_run(root, data):
     title = 'Ordering ' + str(data.get('suite') or 'test run')
-    body = '<p class="muted">ORDERING AUTOMATION · RUN EVIDENCE</p><h1>' + esc(title) + '</h1><p class="badge ' + esc(data['status']) + '">' + esc(data['status'].replace('-', ' ').title()) + '</p><p class="counts">' + esc(count_text(data.get('counts') or {})) + '</p>'
+    lock = data.get('executionIssue')
+    result_text = 'Tests did not start · Test account locked' if lock else count_text(data['counts']) if data.get('counts') else 'No complete test report available'
+    body = '<p class="muted">ORDERING AUTOMATION · RUN EVIDENCE</p><h1>' + esc(title) + '</h1><p class="badge ' + esc(data['status']) + '">' + esc(data['status'].replace('-', ' ').title()) + '</p><p class="counts">' + esc(result_text) + '</p>'
+    if lock:
+        body += '<section class="notice"><h2>Account lock prevented execution</h2><p>' + esc(lock['explanation']) + '</p><p>Blocking ' + esc(lock['source']) + ' run: <code>' + esc(lock['owner']) + '</code><br>Acquired ' + esc(lock['acquiredIST']) + '<br>Lease: <code>' + esc(lock['ref']) + '</code></p><p>' + esc(lock['nextCheck']) + '</p></section>'
     body += '<p>' + esc(ist(data['finishedAt'])) + ' · Source <code>' + esc(data.get('sourceSha', '')[:7]) + '</code> · Run <code>' + esc(data['runKey']) + '</code></p>'
     if data.get('origin'):
         body += '<p class="muted">Target: <code>' + esc(data['origin']) + '</code></p>'
-    body += '<p class="muted">Evidence expires ' + esc(ist(data['expiresAt'])) + '. Retention: ' + str(data['retentionDays']) + ' days.</p><nav><a class="button" href="../../">Report history</a><a class="button" href="#failures">Failed / flaky cases</a>'
+    body += '<p class="muted">Evidence expires ' + esc(ist(data['expiresAt'])) + '. Retention: ' + str(data['retentionDays']) + ' days.</p><nav><a class="button" href="../../">Report history</a>'
+    if not lock:
+        body += '<a class="button" href="#failures">Failed / flaky cases</a>'
     if re.fullmatch(r'https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+', data.get('sourceUrl', '')):
         body += '<a class="button" href="' + esc(data['sourceUrl']) + '">GitHub run</a>'
     body += '</nav><div class="cards">'
@@ -293,7 +302,9 @@ def render_run(root, data):
         if (root / 'devices' / name / 'index.html').is_file():
             body += '<a class="button" href="devices/' + esc(name) + '/">Open Playwright report</a>'
         body += '</article>'
-    body += '</div>' + analysis_html(data) + '<h2 id="failures">Failed cases</h2>'
+    body += '</div>' + analysis_html(data)
+    if not lock:
+        body += '<h2 id="failures">Failed cases</h2>'
     for item in data['failures']:
         observed = failure_analysis.observation_for(failure_analysis.facts_for(item), [item['project']])
         body += '<article class="card"><strong>' + esc(DEVICES[item['project']]) + ' · ' + esc(item['title']) + '</strong>'
@@ -320,7 +331,7 @@ def render_run(root, data):
         target = root / item['path']
         target.parent.mkdir(exist_ok=True)
         target.write_text(page(item['title'], content), encoding='utf-8')
-    if not data['failures']:
+    if not data['failures'] and not lock:
         body += '<p>No failed case details recorded for this run.</p>'
     for warning in data.get('warnings', []):
         body += '<p class="notice">' + esc(warning) + '</p>'
@@ -357,7 +368,8 @@ def assemble(bundles, destination, now=None):
     if records:
         body += '<nav><a class="button" href="runs/' + esc(records[0]['runKey']) + '/">Latest report</a></nav>'
     for record in records:
-        body += '<article class="card"><a href="runs/' + esc(record['runKey']) + '/"><strong>' + esc(record.get('suite', 'run')) + ' · ' + esc(record['status']) + ' · ' + esc(ist(record['finishedAt'])) + '</strong></a><p>' + esc(count_text(record.get('counts') or {})) + '</p></article>'
+        result_text = 'Tests did not start · Test account locked' if record.get('executionIssue') else count_text(record['counts']) if record.get('counts') else 'No complete test report available'
+        body += '<article class="card"><a href="runs/' + esc(record['runKey']) + '/"><strong>' + esc(record.get('suite', 'run')) + ' · ' + esc(record['status']) + ' · ' + esc(ist(record['finishedAt'])) + '</strong></a><p>' + esc(result_text) + '</p></article>'
     if not records:
         body += '<p>No retained reports are available.</p>'
     (destination / 'index.html').write_text(page('Ordering test reports', body), encoding='utf-8')

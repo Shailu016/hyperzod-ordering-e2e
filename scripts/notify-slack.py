@@ -35,6 +35,33 @@ def http_url(value):
     return None
 
 
+def lease_explanation(summary):
+    if summary.get('errorCode') != 'identity-lease-conflict':
+        return None
+    held = summary.get('leaseConflict')
+    if (summary.get('status') != 'infrastructure-failed' or summary.get('testsStarted') is not False
+            or summary.get('counts') or summary.get('projects') or summary.get('outcomes') or summary.get('failedTests')
+            or not isinstance(held, dict)):
+        raise ValueError('Invalid account lock conflict evidence')
+    patterns = {'ref': r'e2e-lease-[a-f0-9]{24}', 'sha': r'[a-f0-9]{40}', 'owner': r'[A-Za-z0-9_-]{1,100}',
+                'source': r'local|github', 'acquiredAt': r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z'}
+    if any(not isinstance(held.get(key), str) or not re.fullmatch(pattern, held[key]) for key, pattern in patterns.items()):
+        raise ValueError('Invalid account lock owner metadata')
+    try:
+        acquired = datetime.fromisoformat(held['acquiredAt'].replace('Z', '+00:00'))
+    except ValueError:
+        raise ValueError('Invalid account lock acquisition time') from None
+    result = {key: held[key] for key in patterns}
+    if held['source'] == 'github':
+        if not isinstance(held.get('githubRunId'), str) or not re.fullmatch(r'\d{1,30}', held['githubRunId']):
+            raise ValueError('Invalid account lock source run')
+        result['githubRunId'] = held['githubRunId']
+    result['acquiredIST'] = acquired.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime('%d %b %Y · %I:%M:%S %p IST')
+    result['explanation'] = 'Tests did not start: another runner holds the test account lock. No test screenshots or videos were generated.'
+    result['nextCheck'] = 'Confirm the owning runner has stopped, reconcile account/order state, then recover the exact lease using docs/LEASE-RECOVERY.md. Age alone does not permit recovery.'
+    return result
+
+
 def validate_summary(summary):
     if not isinstance(summary, dict) or summary.get('status') not in ('passed', 'failed', 'running', 'infrastructure-failed'):
         raise ValueError('Unknown report outcome')
@@ -62,6 +89,7 @@ def validate_summary(summary):
             raise ValueError('Invalid schedule check time') from None
     if not isinstance(summary.get('failedTests', []), list) or not all(isinstance(item, dict) for item in summary.get('failedTests', [])):
         raise ValueError('Invalid failure evidence')
+    lease_explanation(summary)
     if summary['status'] == 'passed':
         expected = summary.get('expectedProjects')
         names = [project.get('project') for project in projects]
@@ -122,6 +150,7 @@ def publication_info(summary, context):
 
 
 def build_payload(summary, context):
+    lock = lease_explanation(summary)
     admission_blocked = context.get('E2E_EXECUTION_BLOCKED') == 'true'
     admission_rejected = admission_blocked and context.get('E2E_ADMISSION_REJECTED') == 'true'
     publication = None if admission_blocked else publication_info(summary, context)
@@ -139,11 +168,15 @@ def build_payload(summary, context):
     heading = f"{icon} Ordering {label} · {run_label} · {'Schedule Alert' if schedule_monitor else status.replace('-', ' ').title()}"
     if admission_blocked:
         heading = f"⚠️ Ordering schedule · {run_label} · {'Execution blocked' if admission_rejected else 'Execution unverified'}"
+    elif lock:
+        heading = f'⚠️ Ordering {label} · {run_label} · Test account locked'
     detail = " · ".join(f"{counts.get(key, 0)} {name}" for key, name in (("passed", "passed"), ("failed", "failed"), ("skipped", "skipped"), ("flaky", "flaky"), ("notRun", "not run"))) if counts else "No complete test report available"
     if admission_blocked:
         detail = 'Tests did not start because schedule admission was rejected. No test report, screenshots or videos were generated.' if admission_rejected else 'Execution could not be verified because its admission receipt is missing or invalid. Test outcome is unknown; inspect the source workflow.'
     if schedule_monitor:
         detail = 'Scheduled execution is missing, delayed or interrupted. Check the schedule issue below; this monitor does not report a storefront test failure.'
+    if lock and not admission_blocked:
+        detail = lock['explanation']
     repository = context.get("GITHUB_REPOSITORY", "")
     run_id = context.get("GITHUB_RUN_ID", "")
     url = f"https://github.com/{repository}/actions/runs/{run_id}" if re.fullmatch(r"[\w.-]+/[\w.-]+", repository) and str(run_id).isdigit() else ""
@@ -154,6 +187,11 @@ def build_payload(summary, context):
         issues.append('Account lock retained: ' + summary['leaseRetainedReason'])
     blocks = [{"type": "header", "text": {"type": "plain_text", "text": clean(heading, 140), "emoji": True}},
               {"type": "section", "text": {"type": "mrkdwn", "text": ("*Schedule status*\n" if schedule_monitor or admission_blocked else "*Results*\n") + detail}}]
+    if lock and not admission_blocked:
+        text = '*Blocking owner*\n' + clean(lock['source']) + ' run ' + clean(lock['owner']) + '\nAcquired ' + clean(lock['acquiredIST']) + '\nLease: ' + clean(lock['ref']) + '\n*Recovery*\n' + lock['nextCheck']
+        if lock.get('githubRunId') and re.fullmatch(r'[\w.-]+/[\w.-]+', repository):
+            text += '\n<https://github.com/' + repository + '/actions/runs/' + lock['githubRunId'] + '|Inspect owning run>'
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}})
     target = http_url(summary.get('origin', context.get('BASE_URL', '')))
     if target and publication:
         blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'Target: <' + target + '|' + clean(urlparse(target).hostname, 150) + '>'}]})
@@ -254,7 +292,8 @@ def build_payload(summary, context):
     if buttons:
         blocks.append({"type": "actions", "elements": buttons})
     if publication and publication['verified']:
-        blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': f"Screenshots and videos in the report · Evidence retained for {publication['retentionDays']} days"}]})
+        evidence_label = 'Lock diagnostics in the report' if lock else 'Screenshots and videos in the report'
+        blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': f"{evidence_label} · Evidence retained for {publication['retentionDays']} days"}]})
     # Fallback is for screen readers and notification previews; only blocks render in-channel.
     fallback = clean(heading) + " — " + detail
     if failures:
