@@ -40,7 +40,7 @@ HTTP, application-level and transport errors are captured for first-party APIs. 
 
 `npm run lint` validates JavaScript syntax, rejects focused tests, parses workflow YAML, checks Playwright image/package alignment, lists tests without executing them, and type-checks the critical policy/lease/manifest/report/scheduler modules. `npm run test:unit` uses local mocks only. Python notifier checks use mock responses: `python -m unittest discover -s tests-unit -p '*_test.py'`. The PowerShell runner invokes Node directly and preserves the aggregate exit code. Playwright package/image versions are pinned to 1.61.1.
 
-Production acceptance requires both offline verification and live multi-device results. Storefront defects in the remaining coverage stay visible as failures and block the full PR acceptance gate. Removed areas (accessibility, address persistence, service-area map, address page) are no longer gated; their known defects are tracked outside this suite. The local validation record distinguishes automation corrections from defects in the deployed application.
+PR acceptance requires offline verification and complete live multi-device evidence. Unknown storefront failures, missing coverage, flaky results and unsafe cleanup block promotion. An owner-approved, time-limited exception permits only the known `address-getter-call` storefront defect through the PR gate; the address-book test remains enabled and failed in raw evidence and scheduled reports. See docs/PR-ACCEPTANCE.md. The local validation record distinguishes automation corrections from defects in the deployed application.
 
 **Local validation and report preview**
 

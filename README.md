@@ -19,6 +19,8 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 `npm run test:diagnostics:browser` verifies navigation diagnostics in Chromium and WebKit against loopback fixtures only. Install them with `npx playwright install --with-deps chromium webkit`; PR static checks run these regressions too.
 `npm run test:reports:browser` verifies generated reports, real fixture screenshots, recordings and video downloads locally. The controlled fixture failures exercise reporting; they are not storefront failures.
 
+PR acceptance distinguishes automation release readiness from storefront health. The exact, owner-approved address getter defect has a time-limited exception; its test remains failed in evidence. All other failures and missing or unsafe lifecycle evidence still block. See [docs/PR-ACCEPTANCE.md](docs/PR-ACCEPTANCE.md).
+
 ## Authorized storefront execution
 
 `npm run test:smoke`, `test:web`, `test:android`, `test:ios`, `test:mobile` and `npm test` use the serial managed runner.
