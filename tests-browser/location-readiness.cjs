@@ -54,7 +54,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
     const priorAllowed = process.env.E2E_ALLOWED_ORIGINS;
     process.env.BASE_URL = origin;
     process.env.E2E_ALLOWED_ORIGINS = origin;
-    const { ensureLocation, openAuthPanel } = require('../utils/app');
+    const { ensureLocation, openAuthPanel, gotoWithRetry } = require('../utils/app');
     let browser;
     try {
       browser = await engine.launch({ headless: true });
@@ -94,6 +94,12 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           await openAuthPanel(page);
           assert.equal(await page.locator('#loginEmailOrNumber').isVisible(), true);
           assert.equal(extraDocumentRequests, 0, 'settled location must not trigger another boot/navigation');
+          // Later navigations reopen the picker too; readiness belongs at the
+          // shared navigation/boot boundary, not just before authentication.
+          await gotoWithRetry(page, origin + '/en/home?mode=' + mode);
+          assert.equal(await page.evaluate(() => window.closeClicks), 1);
+          await page.locator('#LoginBtn').click({ timeout: 5000 });
+          assert.equal(await page.locator('#loginEmailOrNumber').isVisible(), true);
         }
         assert.equal(await selected(), before, 'closing an optional drawer must preserve the exact selected location');
         assert.equal(await page.evaluate(() => window.nestedCloseClicks), 0, 'the nested address editor close control must never be selected');

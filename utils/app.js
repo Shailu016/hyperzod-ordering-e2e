@@ -75,6 +75,7 @@ async function waitForAppBoot(page) {
 	// Visible persisted UI can precede startup /me, address and coupon requests.
 	// Let those finish before the next user interaction or route transition.
 	await require('./reporting').settlePageRequests(page);
+	await dismissSettledLocationDrawer(page, hasSelectedLocation);
 }
 
 async function expectBootOk(page, timeout) {
@@ -150,6 +151,7 @@ async function gotoWithRetry(page, url, { timeout = 20_000 } = {}) {
 				),
 		}
 	);
+	await waitForAppBoot(page);
 }
 
 /**

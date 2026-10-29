@@ -110,7 +110,8 @@ function startCapture(page, { drainTimeoutMs = 5_000, navigationDrainTimeoutMs =
         } catch (error) {
           const detail = String(error?.message || error);
           const previousDocument = requestDocuments.has(response.request()) && requestDocuments.get(response.request()) < documentGeneration;
-          const navigationDiscardedRead = previousDocument && isReadRequest(event) && /No resource with given identifier found/.test(detail);
+          const previousRoute = requestNavigations.has(response.request()) && requestNavigations.get(response.request()) < navigationGeneration;
+          const navigationDiscardedRead = (previousDocument || previousRoute) && isReadRequest(event) && /No resource with given identifier found/.test(detail);
           record({ ...event, navigationDiscarded: navigationDiscardedRead, kind: navigationDiscardedRead ? 'cancelled' : 'inspection', status, message: `APPLICATION could not inspect JSON response ${safeURL(event.url)}${navigationDiscardedRead ? ' (read discarded by document navigation)' : ''}: ${detail}` });
         }
       })();
