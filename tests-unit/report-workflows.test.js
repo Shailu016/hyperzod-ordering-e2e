@@ -75,7 +75,7 @@ test('static browser checks use the accepted pinned image with both checks and b
   assert.ok(browser);
   const image = browser.run.match(/mcr\.microsoft\.com\/playwright:v[\d.]+-noble/)[0];
   assert.equal(image, workflow.jobs.acceptance.container.image);
-  assert.ok(browser.run.includes('npm run test:diagnostics:browser && npm run test:reports:browser'));
+  assert.ok(browser.run.includes('npm run test:diagnostics:browser && npm run test:location:browser && npm run test:reports:browser'));
   assert.match(browser.run, /docker run --rm --init --ipc=host/);
   assert.match(browser.run, /-v "\$PWD:\/work" -w \/work/);
   assert.ok(!workflow.jobs.static.steps.some(step => step.run?.includes('playwright install --with-deps')));

@@ -25,7 +25,7 @@ const { deleteCurrentUserViaUI, proveUserGone } = require("../flows/user.flow");
 setup("signup: purge leftovers, create user via UI and persist session @smoke", async ({ page, context }) => {
 	setup.setTimeout(300_000);
 	require("../utils/manifest").assertManagedRun();
-	require("../utils/manifest").updateManifest({ lifecycle: "setup-started" });
+	require("../utils/manifest").startSetupManifest();
 
 	const missing = validateEnv();
 	expect(missing, `Missing required .env vars: ${missing.join(", ")}`).toEqual([]);

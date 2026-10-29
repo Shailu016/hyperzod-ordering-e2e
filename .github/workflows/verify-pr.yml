@@ -41,7 +41,7 @@ jobs:
                 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 update
                 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 install -y --no-install-recommends python3-minimal
               fi
-              npm run test:diagnostics:browser && npm run test:reports:browser
+              npm run test:diagnostics:browser && npm run test:location:browser && npm run test:reports:browser
             '
       - run: python3 -m unittest discover -s tests-unit -p '*_test.py'
       - name: Validate PowerShell syntax

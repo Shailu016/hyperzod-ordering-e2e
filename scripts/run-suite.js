@@ -6,9 +6,9 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { acquireLease } = require('../utils/lease');
 const { exportManifest } = require('../utils/manifest');
-const { assertAllowedTarget } = require('../utils/policy');
+const { assertAllowedTarget, identityKey } = require('../utils/policy');
 const { summarizeReports } = require('./summarize');
-const { requiresReconciliation } = require('../utils/lifecycle');
+const { requiresReconciliation, identityAccessNeverStarted } = require('../utils/lifecycle');
 const ROOT = path.resolve(__dirname, '..');
 const SUITES = { signup: ['setup'], smoke: ['web'], web: ['web'], android: ['android'], ios: ['ios'], mobile: ['android', 'ios'], all: ['web', 'android', 'ios'] };
 async function run(suite = process.argv[2]) {
@@ -29,6 +29,7 @@ async function run(suite = process.argv[2]) {
   let child;
   let stopped = false;
   let reconciliationRequired = false;
+  let leaseReleaseReason;
   const stop = () => { stopped = true; child?.kill('SIGTERM'); };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
@@ -64,12 +65,20 @@ async function run(suite = process.argv[2]) {
       try { resource = exportManifest(`${runId}-${project}`, projectDir); }
       catch (error) { result.exitCode = 1; result.error = `Lifecycle evidence export failed: ${error.message}`; }
       reconciliationRequired = requiresReconciliation(resource);
+      let noIdentityAccess = false;
+      if (reconciliationRequired) {
+        try {
+          const report = JSON.parse(fs.readFileSync(path.join(projectDir, 'report.json'), 'utf8'));
+          noIdentityAccess = identityAccessNeverStarted(resource, { runId: `${runId}-${project}`, origin, key: identityKey(origin, process.env.TEST_USER_EMAIL) }, report, project);
+        } catch { /* Missing/invalid report cannot establish untouched identity. */ }
+        if (noIdentityAccess) { reconciliationRequired = false; leaseReleaseReason = 'identity-access-never-started'; }
+      }
       outcomes.push({ project, ...result, report: path.join(projectDir, 'report.json') });
       writeSummary({ ...initial, outcomes });
-      if (reconciliationRequired) break;
+      if (reconciliationRequired || noIdentityAccess) break;
     }
     const summary = summarizeReports(initial, outcomes, fs.readFileSync);
-    writeSummary({ ...summary, finishedAt: new Date().toISOString() });
+    writeSummary({ ...summary, ...(leaseReleaseReason ? { leaseReleaseReason } : {}), finishedAt: new Date().toISOString() });
     process.exitCode = summary.status === 'passed' ? 0 : 1;
   } catch (error) {
     writeSummary({ ...initial, outcomes, status: 'infrastructure-failed', error: error.message,
