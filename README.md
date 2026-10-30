@@ -9,7 +9,7 @@ Run `npm ci` and copy `.env.example` to `.env`. GitHub uses the repository's exi
 The default allowed target is `https://automations-store.hyperzod.me`; other test origins require explicit `E2E_ALLOWED_ORIGINS`.
 Run `npm run check:env` before live execution. Local live runs require an authenticated `gh` CLI;
 Bitbucket requires `E2E_LEASE_TOKEN` with repository contents read/write. Every runner leases its selected identity.
-Local managed runs generate a distinct email/phone by default; GitHub Actions keeps the configured scheduled identity.
+Local managed runs generate a distinct email/phone by default. Trusted pull-request acceptance explicitly uses a fresh identity per invocation; scheduled GitHub runs keep the configured scheduled identity. A failed PR cleanup retains only that PR identity's lease, without blocking scheduled monitoring. Isolation does not replace cleanup or order reconciliation.
 If a runner crashes, inspect and recover its exact lease only by following [docs/LEASE-RECOVERY.md](docs/LEASE-RECOVERY.md).
 
 ## Offline verification

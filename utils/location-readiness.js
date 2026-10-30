@@ -14,7 +14,9 @@ async function dismissSettledLocationDrawer(page, hasSelectedLocation, { timeout
   await expect(close, 'settled location drawer close control').toHaveCount(1, { timeout });
   await close.click({ timeout });
   await expect(drawer, 'location drawer must close before auth navigation').toHaveCount(0, { timeout });
-  await expect(page.locator('.location-overlay:visible'), 'location scrim must stop covering the header').toHaveCount(0, { timeout });
+  // Auth, address and cart panels reuse the same overlay class. Only the
+  // sibling overlay belonging to the location panel is ours to observe.
+  await expect(page.locator('.location-overlay:has(+ .location-panel):visible'), 'location scrim must stop covering the header').toHaveCount(0, { timeout });
   if (!await hasSelectedLocation(page)) throw new Error('Closing the location drawer lost the selected location');
   return true;
 }

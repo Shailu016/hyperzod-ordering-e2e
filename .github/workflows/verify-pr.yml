@@ -65,6 +65,7 @@ jobs:
     timeout-minutes: 100
     env:
       CI: 'true'
+      E2E_ISOLATED_IDENTITY: 'true'
       E2E_LEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BASE_URL: ${{ secrets.E2E_BASE_URL }}
       TEST_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}

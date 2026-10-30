@@ -23,6 +23,8 @@ function fixture(mode) {
       <input placeholder="Search for area or street name"><p>Indore Active</p>
       <section><div class="v-card-title"><span>Edit Address</span><button id="nested-close">Close nested editor</button></div></section>
     </nav>
+    <div id="auth-scrim" class="location-overlay" style="left:99%;pointer-events:none"></div>
+    <nav id="auth-side-panel" hidden></nav>
     <script>
       window.closeClicks=0;window.loginClicks=0;window.nestedCloseClicks=0;
       localStorage.clear();
@@ -103,6 +105,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         }
         assert.equal(await selected(), before, 'closing an optional drawer must preserve the exact selected location');
         assert.equal(await page.evaluate(() => window.nestedCloseClicks), 0, 'the nested address editor close control must never be selected');
+        assert.equal(await page.locator('#auth-scrim').isVisible(), true, 'another panel using the same overlay class must remain untouched');
         await page.close();
       }
     } finally {

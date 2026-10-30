@@ -40,7 +40,7 @@ async function run(suite = process.argv[2]) {
       const identity = require('../utils/isolated-identity').isolatedIdentity(process.env.TEST_USER_EMAIL);
       process.env.TEST_USER_EMAIL = identity.email;
       process.env.TEST_USER_PHONE = identity.phone;
-      console.log('Local validation uses an isolated test identity. Notifications are not part of this runner.');
+      console.log('This validation run uses an isolated test identity. Notifications are not part of this runner.');
     }
     const missing = require('../utils/env').validateEnv();
     if (missing.length) throw new Error(`Invalid E2E settings: ${missing.join(', ')}`);
