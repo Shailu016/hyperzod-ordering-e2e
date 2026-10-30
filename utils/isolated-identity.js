@@ -3,12 +3,13 @@ function useIsolatedIdentity(env = process.env) {
   const value = env.E2E_ISOLATED_IDENTITY;
   if (value !== undefined && value !== '' && !['true', 'false'].includes(value)) throw new Error('E2E_ISOLATED_IDENTITY must be true or false');
   if (env.GITHUB_ACTIONS === 'true') {
-    if (value === 'true') throw new Error('Isolated identity is a local validation option');
+    if (value === 'true' && env.GITHUB_EVENT_NAME === 'pull_request') return true;
+    if (value === 'true') throw new Error('Isolated identity requires a local run or pull_request acceptance');
     return false;
   }
   return value !== 'false';
 }
-/** Generate a distinct local test email and phone without changing the shared .env. */
+/** Generate a distinct validation identity without changing the shared .env. */
 function isolatedIdentity(email) {
   const match = /^([^\s@]+)@([^\s@]+\.[^\s@]+)$/.exec(email || '');
   if (!match) throw new Error('Valid TEST_USER_EMAIL required for an isolated identity');

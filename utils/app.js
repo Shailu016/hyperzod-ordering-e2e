@@ -2,6 +2,7 @@
 const { expect } = require("@playwright/test");
 const { config } = require("./env");
 const { retryAsync } = require("./retry");
+const { dismissSettledLocationDrawer } = require('./location-readiness');
 
 /** Escape user input before embedding it in a RegExp. */
 function escapeRegExp(text) {
@@ -74,6 +75,7 @@ async function waitForAppBoot(page) {
 	// Visible persisted UI can precede startup /me, address and coupon requests.
 	// Let those finish before the next user interaction or route transition.
 	await require('./reporting').settlePageRequests(page);
+	await dismissSettledLocationDrawer(page, hasSelectedLocation);
 }
 
 async function expectBootOk(page, timeout) {
@@ -149,6 +151,7 @@ async function gotoWithRetry(page, url, { timeout = 20_000 } = {}) {
 				),
 		}
 	);
+	await waitForAppBoot(page);
 }
 
 /**
@@ -211,7 +214,10 @@ async function ensureLocation(page) {
 			if (await hasSelectedLocation(page)) {
 				// Storage says settled - but verify it rendered. A "wiped"
 				// recovery also cleared location, so fall through to set it.
-				if ((await ensureInteractiveShell(page)) !== "wiped") return;
+				if ((await ensureInteractiveShell(page)) !== "wiped") {
+					await dismissSettledLocationDrawer(page, hasSelectedLocation);
+					return;
+				}
 			}
 		} catch {
 			/* fall through to full flow */
@@ -232,6 +238,13 @@ async function ensureLocation(page) {
 		const openNow = await heading.isVisible().catch(() => false);
 		const locatedNow = await hasSelectedLocation(page).catch(() => false);
 		if (!openNow && locatedNow) return; // settled, common case
+		if (openNow && locatedNow) {
+			await dismissSettledLocationDrawer(page, hasSelectedLocation);
+			// Vuetify keeps inactive drawers mounted off-screen. Their heading
+			// can remain "visible" to Playwright; the active drawer/scrim proof
+			// in dismissSettledLocationDrawer is the readiness condition.
+			return;
+		}
 		if (openNow && !locatedNow) {
 			// Flash or stuck? The app can auto-resolve location (and close
 			// the drawer itself) ~20s into boot - give it 30s to settle on
@@ -249,6 +262,7 @@ async function ensureLocation(page) {
 				.then(() => true)
 				.catch(() => false);
 			if (resolved) {
+				await dismissSettledLocationDrawer(page, hasSelectedLocation);
 				console.log("[location] transient drawer resolved on its own - proceeding");
 				return;
 			}
@@ -289,6 +303,7 @@ async function ensureLocation(page) {
 				})
 				.toBeTruthy();
 			await require('./reporting').confirmGeocodingRecovery(page, config.locationQuery);
+			await dismissSettledLocationDrawer(page, hasSelectedLocation);
 			return;
 		}
 		// No location and no drawer to satisfy it - leave the page
@@ -318,6 +333,7 @@ async function ensureLocation(page) {
 		})
 		.toBeTruthy();
 	await require('./reporting').confirmGeocodingRecovery(page, config.locationQuery);
+	await dismissSettledLocationDrawer(page, hasSelectedLocation);
 }
 
 /** Open the auth side panel via the header Login button. Idempotent: if the
@@ -341,6 +357,7 @@ async function openAuthPanel(page) {
 		try {
 			// Panel already open (e.g. left open by a probe step) - done.
 			if (await input.isVisible().catch(() => false)) return;
+			await dismissSettledLocationDrawer(page, hasSelectedLocation);
 			// A leftover drawer (location search, side menu) can cover the
 			// header and swallow clicks into its scrim (verified live:
 			// "Search for your location" overlaying #LoginBtn). Dismiss
@@ -381,6 +398,7 @@ async function openAuthPanel(page) {
  * @returns {Promise<any>} parsed /login/intent response body
  */
 async function submitLoginIntent(page, emailOrPhone) {
+	require('./manifest').markIdentityAccessStarted();
 	const input = page.locator("#loginEmailOrNumber");
 	await input.fill(emailOrPhone);
 	const respPromise = page.waitForResponse(

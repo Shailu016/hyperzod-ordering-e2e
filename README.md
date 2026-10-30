@@ -9,7 +9,7 @@ Run `npm ci` and copy `.env.example` to `.env`. GitHub uses the repository's exi
 The default allowed target is `https://automations-store.hyperzod.me`; other test origins require explicit `E2E_ALLOWED_ORIGINS`.
 Run `npm run check:env` before live execution. Local live runs require an authenticated `gh` CLI;
 Bitbucket requires `E2E_LEASE_TOKEN` with repository contents read/write. Every runner leases its selected identity.
-Local managed runs generate a distinct email/phone by default; GitHub Actions keeps the configured scheduled identity.
+Local managed runs generate a distinct email/phone by default. Trusted pull-request acceptance explicitly uses a fresh identity per invocation; scheduled GitHub runs keep the configured scheduled identity. A failed PR cleanup retains only that PR identity's lease, without blocking scheduled monitoring. Isolation does not replace cleanup or order reconciliation.
 If a runner crashes, inspect and recover its exact lease only by following [docs/LEASE-RECOVERY.md](docs/LEASE-RECOVERY.md).
 
 ## Offline verification
@@ -18,6 +18,10 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 `npm run test:unit` and `python -m unittest discover -s tests-unit -p '*_test.py'` use mocks and do not contact the storefront or Slack.
 `npm run test:diagnostics:browser` verifies navigation diagnostics in Chromium and WebKit against loopback fixtures only. Install them with `npx playwright install --with-deps chromium webkit`; PR static checks run these regressions too.
 `npm run test:reports:browser` verifies generated reports, real fixture screenshots, recordings and video downloads locally. The controlled fixture failures exercise reporting; they are not storefront failures.
+
+Only `static` is a required CI check for merging this personal E2E tool. Live storefront verification is informational: failures stay red in its job and artifacts but do not block releasing the automation tool. PR protection and an up-to-date branch remain required. See [docs/PR-ACCEPTANCE.md](docs/PR-ACCEPTANCE.md).
+
+The local-expiry-hint scenario follows the current storefront policy: only a backend 401 logs out a session; editing `token_expires_in` alone must not log out a backend-valid user. It verifies the same user and unchanged token survive reload. It does not claim to test actual backend token expiration or 401 handling.
 
 ## Authorized storefront execution
 
@@ -37,6 +41,7 @@ npm run test:smoke
 The runner does not send notifications. `E2E_NOTIFICATIONS_DISABLED=true` also blocks the standalone notifier.
 `E2E_ENV_FILE` can select an existing private env file without copying it into another checkout.
 Missing cleanup proof or an ambiguous order stops subsequent devices and retains the lease for audited reconciliation.
+The narrow exception is a completed setup failure proven to precede all identity access, with matching scope and an explicit untouched access journal. It stops the suite, preserves the failure, and releases only its own lease without claiming account absence. Location readiness also requires dismissing an optional location drawer through its own header close control before auth navigation; a mandatory picker is never dismissed without a selected location.
 Set `E2E_ISOLATED_IDENTITY=false` locally only when deliberately testing the shared account; an interrupted run can block scheduled executions until recovery. Isolation does not replace cleanup: inspect an interrupted local run's `.auth/<runId>-<project>/manifest.json`, reconcile any account/orders, and recover its exact lease through the runbook. Never delete a lock merely because it is old.
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.
 When the server reports half or less of its per-minute request allowance remaining, the next scenario waits for the reset (or a full minute when no reset is supplied). This pacing preserves capacity for a complete user journey without hiding API failures. Invalid cooldown evidence stops the next scenario.

@@ -2,6 +2,8 @@
 
 The identity lease is a Git tag named `e2e-lease-<24 hex characters>`. A failed process can leave it behind. Never delete a lease by age alone: the owner may still be mutating the shared account.
 
+A failed setup before any identity access can release its own lease only when the versioned, monotonic access journal explicitly records `false`, the scope matches, and the completed Playwright report proves failed setup with no executed business tests. This records `leaseReleaseReason=identity-access-never-started`; it does not claim the account absent or change failed tests to passing. Missing/legacy evidence, identity access, user IDs, order attempts, or recorded orders cannot use this exception. Genuine unresolved cleanup still retains the lease.
+
 Local managed runs now use distinct email/phone identities by default, so their locks do not block the scheduled account. `E2E_ISOLATED_IDENTITY=false` explicitly opts a local run into the shared identity. Interrupted isolated runs still require resource reconciliation; isolation is not proof of cleanup.
 
 A confirmed conflict reports **Test account locked / Tests did not start**, with the blocking owner, source, acquisition time in IST, and exact lease. A lock request failure without verified ownership stays an infrastructure/API error. There are no test screenshots or videos when acquisition prevents tests from starting. Check the owning run rather than rerunning the blocked suite or replaying account mutations.

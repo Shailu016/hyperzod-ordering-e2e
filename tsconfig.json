@@ -21,6 +21,7 @@
     "utils/api-budget.js",
     "utils/isolated-identity.js",
     "utils/lifecycle.js",
+    "utils/location-readiness.js",
     "utils/lease.js",
     "utils/manifest.js",
     "utils/lease-recovery.js",

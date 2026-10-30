@@ -1,11 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { isolatedIdentity, useIsolatedIdentity } = require('../utils/isolated-identity');
-test('local runs isolate by default, shared identity requires explicit opt-in, CI remains shared', () => {
+test('local runs isolate by default, PRs opt into isolation, scheduled CI remains shared', () => {
   assert.equal(useIsolatedIdentity({}), true);
   assert.equal(useIsolatedIdentity({ E2E_ISOLATED_IDENTITY: '' }), true);
   assert.equal(useIsolatedIdentity({ E2E_ISOLATED_IDENTITY: 'false' }), false);
   assert.equal(useIsolatedIdentity({ GITHUB_ACTIONS: 'true' }), false);
+  assert.equal(useIsolatedIdentity({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request', E2E_ISOLATED_IDENTITY: 'true' }), true);
+  assert.throws(() => useIsolatedIdentity({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'schedule', E2E_ISOLATED_IDENTITY: 'true' }), /local/);
   assert.throws(() => useIsolatedIdentity({ E2E_ISOLATED_IDENTITY: 'FALSE' }), /true or false/);
   assert.throws(() => useIsolatedIdentity({ GITHUB_ACTIONS: 'true', E2E_ISOLATED_IDENTITY: 'true' }), /local/);
 });

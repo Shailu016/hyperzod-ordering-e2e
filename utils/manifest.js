@@ -24,11 +24,23 @@ function readManifest() {
 function updateManifest(patch) {
   const data = { ...readManifest(), ...patch };
   const file = path.join(runDir(), 'manifest.json');
+  if (patch.identityAccessStarted === false && fs.existsSync(file)) throw new Error('Identity access journal cannot be reset');
   fs.mkdirSync(runDir(), { recursive: true });
   const temporary = `${file}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(data, null, 2));
   fs.renameSync(temporary, file);
   return data;
+}
+function startSetupManifest() {
+  const exists = fs.existsSync(path.join(runDir(), 'manifest.json'));
+  // Only a brand-new project run can establish that access never started.
+  // Existing/legacy evidence remains unknown or true; setup must not erase it.
+  return updateManifest({ lifecycle: 'setup-started', ...(!exists ? { identityAccessJournalVersion: 1, identityAccessStarted: false } : {}) });
+}
+function markIdentityAccessStarted() {
+  assertManagedRun();
+  // Persist before typing/submitting any identity. A write error aborts access.
+  return updateManifest({ identityAccessJournalVersion: 1, identityAccessStarted: true });
 }
 function recordOrder(order) {
   const manifest = readManifest();
@@ -43,10 +55,10 @@ function exportManifest(id, destination) {
   if (!fs.existsSync(file)) return;
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (saved.runId !== id) throw new Error('Cannot export another run\'s lifecycle evidence');
-  const fields = ['runId', 'origin', 'key', 'createdAt', 'userId', 'lifecycle', 'cleanedAt', 'cleanupError', 'submissionAttempted', 'orders'];
+  const fields = ['runId', 'origin', 'key', 'createdAt', 'userId', 'lifecycle', 'cleanedAt', 'cleanupError', 'submissionAttempted', 'orders', 'identityAccessJournalVersion', 'identityAccessStarted'];
   const evidence = Object.fromEntries(fields.filter((key) => Object.hasOwn(saved, key)).map((key) => [key, saved[key]]));
   fs.mkdirSync(destination, { recursive: true });
   fs.writeFileSync(path.join(destination, 'resource-lifecycle.json'), redact(JSON.stringify(evidence, null, 2)));
   return evidence;
 }
-module.exports = { runDir, directoryFor, scope, readManifest, updateManifest, recordOrder, assertManagedRun, exportManifest };
+module.exports = { runDir, directoryFor, scope, readManifest, updateManifest, startSetupManifest, markIdentityAccessStarted, recordOrder, assertManagedRun, exportManifest };

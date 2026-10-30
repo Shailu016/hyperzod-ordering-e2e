@@ -67,3 +67,25 @@ test('only a proven document-discarded read is downgraded; mutation and malforme
     }
   } finally { if (previous === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = previous; }
 });
+
+test('SPA-discarded JSON bodies need route proof and a read-only request', async () => {
+  const old = process.env.BASE_URL; process.env.BASE_URL = 'https://automations-store.hyperzod.me';
+  try {
+    for (const [route, navigate, message, expected] of [
+      ['home', true, 'No resource with given identifier found', 0],
+      ['home', false, 'No resource with given identifier found', 1],
+      ['cart', true, 'No resource with given identifier found', 1],
+      ['home', true, 'Unexpected token in JSON', 1],
+    ]) {
+      const page = new EventEmitter(); let url = process.env.BASE_URL + '/en/home';
+      const frame = { url: () => url }; page.url = () => url; page.mainFrame = () => frame;
+      const capture = startCapture(page);
+      const request = { method: () => 'POST', url: () => 'https://api.hyperzod.app/store/v1/' + route, resourceType: () => 'xhr' };
+      page.emit('request', request);
+      if (navigate) { url = process.env.BASE_URL + '/en/profile'; page.emit('framenavigated', frame); }
+      page.emit('response', { url: request.url, status: () => 200, headers: () => ({ 'content-type': 'application/json' }), request: () => request, json: async () => { throw new Error(message); } });
+      page.emit('requestfinished', request); await capture.finish();
+      assert.equal(assessDiagnostics(capture).critical.length, expected);
+    }
+  } finally { if (old === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = old; }
+});
