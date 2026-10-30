@@ -21,6 +21,8 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 
 PR acceptance distinguishes automation release readiness from storefront health. The exact, owner-approved address getter defect has a time-limited exception; its test remains failed in evidence. All other failures and missing or unsafe lifecycle evidence still block. See [docs/PR-ACCEPTANCE.md](docs/PR-ACCEPTANCE.md).
 
+The local-expiry-hint scenario follows the current storefront policy: only a backend 401 logs out a session; editing `token_expires_in` alone must not log out a backend-valid user. It verifies the same user and unchanged token survive reload. It does not claim to test actual backend token expiration or 401 handling.
+
 ## Authorized storefront execution
 
 `npm run test:smoke`, `test:web`, `test:android`, `test:ios`, `test:mobile` and `npm test` use the serial managed runner.

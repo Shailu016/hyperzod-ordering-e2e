@@ -6,7 +6,7 @@ const { ProfilePage } = require("../../pages/ordering.pages");
 /**
  * Session handling @regression @auth.
  * Verified against: store/modules/User.js (atAuthSuccess/logoutUser),
- * mixins/global.js checkSessionExpiration, views/profile/index.vue.
+ * main.js backend-authoritative expiry policy, views/profile/index.vue.
  */
 test.describe("Session handling @auth", () => {
 	test("session survives a full reload", async ({ page }) => {
@@ -34,11 +34,18 @@ test.describe("Session handling @auth", () => {
 	});
 });
 
-test('expired local session logs out without automatic renewal @auth', async ({ page }) => {
+test('expired local hint preserves the same backend-valid session @auth', async ({ page }) => {
 	await ensureLocation(page);
-	await ensureLoggedIn(page);
+	await ensureLoggedIn(page, undefined, { minimumValidityMs: 120_000 });
 	expect(await isLoggedIn(page)).toBe(true);
+	const before = await require('../../utils/store').readStore(page);
+	const token = await page.evaluate(() => localStorage.getItem('access_token'));
 	await page.evaluate(() => localStorage.setItem('token_expires_in', JSON.stringify(Date.now() - 1_000)));
 	await page.reload({ waitUntil: 'domcontentloaded' });
-	await expect.poll(async () => isLoggedIn(page)).toBe(false);
+	await require('../../utils/app').waitForAppBoot(page);
+	await expect.poll(async () => isLoggedIn(page)).toBe(true);
+	const after = await require('../../utils/store').readStore(page);
+	expect(String(after.user.id), 'same authenticated identity after reload').toBe(String(before.user.id));
+	expect(await page.evaluate(() => localStorage.getItem('access_token')), 'no automatic reauthentication/token replacement').toBe(token);
+	await expectAuthedUI(page);
 });
