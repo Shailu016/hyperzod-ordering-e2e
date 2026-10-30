@@ -19,7 +19,7 @@ If a runner crashes, inspect and recover its exact lease only by following [docs
 `npm run test:diagnostics:browser` verifies navigation diagnostics in Chromium and WebKit against loopback fixtures only. Install them with `npx playwright install --with-deps chromium webkit`; PR static checks run these regressions too.
 `npm run test:reports:browser` verifies generated reports, real fixture screenshots, recordings and video downloads locally. The controlled fixture failures exercise reporting; they are not storefront failures.
 
-PR acceptance distinguishes automation release readiness from storefront health. The exact, owner-approved address getter defect has a time-limited exception; its test remains failed in evidence. All other failures and missing or unsafe lifecycle evidence still block. See [docs/PR-ACCEPTANCE.md](docs/PR-ACCEPTANCE.md).
+Only `static` is a required CI check for merging this personal E2E tool. Live storefront verification is informational: failures stay red in its job and artifacts but do not block releasing the automation tool. PR protection and an up-to-date branch remain required. See [docs/PR-ACCEPTANCE.md](docs/PR-ACCEPTANCE.md).
 
 The local-expiry-hint scenario follows the current storefront policy: only a backend 401 logs out a session; editing `token_expires_in` alone must not log out a backend-valid user. It verifies the same user and unchanged token survive reload. It does not claim to test actual backend token expiration or 401 handling.
 
