@@ -14,6 +14,9 @@ from pathlib import Path
 _ai_spec = importlib.util.spec_from_file_location('failure_analysis', Path(__file__).with_name('failure_analysis.py'))
 failure_analysis = importlib.util.module_from_spec(_ai_spec)
 _ai_spec.loader.exec_module(failure_analysis)
+_evidence_spec = importlib.util.spec_from_file_location('analysis_evidence', Path(__file__).with_name('analysis_evidence.py'))
+analysis_evidence = importlib.util.module_from_spec(_evidence_spec)
+_evidence_spec.loader.exec_module(analysis_evidence)
 
 DEVICES = {'web': 'Desktop Chrome', 'android': 'Android', 'ios': 'iOS', 'setup': 'Signup'}
 MAX_SITE_BYTES = 850 * 1024 * 1024
@@ -193,6 +196,7 @@ def prepare(input_dir, output_dir, source, now=None):
             state = 'flaky' if test['status'] == 'flaky' else 'failed'
             item = {'id': case_id, 'project': name, 'title': spec.get('title', 'Failed scenario'), 'status': state, 'error': error[:6000], 'path': 'failures/' + case_id + '.html'}
             item['technicalFacts'] = technical_facts(item, test, project_dir)
+            item['executedSteps'] = analysis_evidence.steps_for(test.get('results', []))
             if has_native:
                 item['nativePath'] = 'devices/' + name + '/#?q=s:' + state
             for result in reversed(test.get('results', [])):
@@ -226,11 +230,11 @@ def prepare(input_dir, output_dir, source, now=None):
     # Publish only selected summary fields, not raw reports or runner filesystem paths.
     metadata['projects'] = [{key: item.get(key) for key in ('project', 'status', 'counts', 'critical', 'warnings')} for item in summary.get('projects', [])]
     metadata.update({'schemaVersion': 1, 'runKey': run_key, 'sourceRunId': run_id, 'sourceAttempt': attempt, 'sourceSha': source.get('head_sha', ''), 'runNumber': source.get('run_number', ''), 'sourceUrl': source.get('html_url', ''), 'expiresAt': iso(expires), 'retentionDays': days, 'failures': details, 'warnings': warnings})
-    analysis = failure_analysis.analyze(details if summary['status'] != 'passed' else [])
+    analysis = failure_analysis.analyze(details if summary['status'] != 'passed' else [], media_root=run_root)
     if analysis['status'] in ('complete', 'unavailable'):
         metadata['failureAnalysis'] = analysis
         summary['failureAnalysis'] = analysis
-        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error', 'technicalFacts')} for item in details]
+        summary['analysisEvidence'] = [{key: item.get(key) for key in ('id', 'project', 'title', 'error', 'technicalFacts', 'executedSteps')} for item in details]
     write_json(run_root / 'manifest.json', metadata)
     render_run(run_root, metadata)
     if sum(entry.stat().st_size for entry in run_root.rglob('*') if entry.is_file()) > MAX_BUNDLE_BYTES:
@@ -256,14 +260,16 @@ def analysis_html(data, case_id=None):
     except (ValueError, TypeError, KeyError):
         return ''
     if analysis['status'] == 'unavailable':
-        reason = {'timeout': 'the 60-second limit was reached', 'authentication': 'the API key was not accepted', 'quota': 'the provider quota was reached', 'model-unavailable': 'the configured model is unavailable'}.get(analysis.get('reason'), 'the provider did not return a usable explanation')
+        reason = {'timeout': 'the 120-second limit was reached', 'authentication': 'the API key was not accepted', 'quota': 'the provider quota was reached', 'model-unavailable': 'the configured model is unavailable'}.get(analysis.get('reason'), 'the provider did not return a usable explanation')
         return '<p class="notice">AI explanation unavailable: ' + reason + '. Original test results and evidence are unchanged.</p>'
     if analysis['status'] != 'complete':
         return ''
     groups = [group for group in analysis['groups'] if case_id is None or case_id in group['failureIds']]
     if not groups:
         return ''
-    body = '<section class="notice"><h2>AI explanation · advisory</h2><p class="muted">Based on limited diagnostic facts. Screenshots and videos were not sent to AI. Possible causes are unconfirmed; test results are unchanged.</p>'
+    body = '<section class="notice"><h2>AI explanation · advisory</h2><p class="muted">Based on captured diagnostics and recorded actions. Possible causes and suggested reproduction steps require verification; test results are unchanged.</p>'
+    labels = analysis.get('visualEvidence', [])
+    body += '<p class="small">' + (esc('Images supplied: ' + '; '.join(labels)) if labels else 'No visual evidence was supplied to AI for this analysis.') + '</p>'
     for group in groups:
         assessment = 'Cause unconfirmed' if group['category'] == 'unknown' else group['category'].title() + ' (suspected)'
         body += '<article><h3>' + esc(' / '.join(DEVICES[name] for name in group['devices'])) + ' · ' + esc(assessment) + '</h3>'
@@ -274,6 +280,10 @@ def analysis_html(data, case_id=None):
                 body += ' · <a href="' + ('../' if case_id else '') + esc(item['path']) + '">Inspect evidence</a>'
             body += '</p>'
         body += '<p><strong>Observation:</strong> ' + esc(group['observation']) + '</p><p><strong>Possible cause:</strong> ' + esc(group['possibleCause']) + '</p><p><strong>Next check:</strong> ' + esc(group['nextCheck']) + '</p></article>'
+        if group.get('confidence'):
+            body += '<p><strong>AI confidence (self-assessed):</strong> ' + esc(group['confidence']) + '</p>'
+        if group.get('reproduction'):
+            body += '<p><strong>Suggested manual check · not independently reproduced:</strong> ' + esc(group['reproduction']) + '</p>'
     if case_id is None:
         covered = sum(len(group['failureIds']) for group in groups)
         body += '<p class="small">Explains ' + str(covered) + ' of ' + str(len(data.get('failures', []))) + ' failed/flaky cases. All original failures appear below.</p>'

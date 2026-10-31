@@ -35,6 +35,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install bounded video frame decoder
+        continue-on-error: true
+        timeout-minutes: 2
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Resolve trusted source run
         if: github.event_name == 'workflow_run'
         id: source
@@ -70,6 +74,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
           E2E_AI_ANALYSIS_DISABLED: ${{ vars.E2E_AI_ANALYSIS_DISABLED }}
+          E2E_AI_VISUAL_EVIDENCE: ${{ vars.E2E_AI_VISUAL_EVIDENCE || 'true' }}
         run: python scripts/report_site.py prepare --input .report-publication/incoming --output .report-publication/prepared --source .report-publication/source-run.json
       - name: Retain generated report bundle outside Git
         id: retained

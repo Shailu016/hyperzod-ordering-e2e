@@ -73,7 +73,7 @@ payload without posting; `E2E_NOTIFICATIONS_DISABLED=true` blocks delivery entir
 Optional Gemini explanations run only after failed/flaky cases are recorded.
 Add `GEMINI_API_KEY` as a repository Actions secret to enable them; the publisher
 uses `gemini-3.5-flash-lite` unless repository variable `GEMINI_MODEL` overrides it.
-Analysis has a hard **60-second** process deadline and one API request per report.
+Analysis has a hard **120-second** process deadline and one API request per report.
 Timeouts, quota errors and invalid output preserve the original results and report
 delivery. Only allowlisted technical facts are sent, never raw logs, screenshots,
 recordings, credentials, request bodies or personal details. Explanations label

@@ -76,7 +76,7 @@ class FailureAnalysisTests(unittest.TestCase):
         self.assertEqual(set(child_env), {'GEMINI_API_KEY', 'PATH'})
         self.assertNotIn('test-key', json.dumps(start.call_args.args))
         self.assertNotIn('element(s) not found', process.communicate.call_args.args[0].decode())
-        self.assertLessEqual(process.communicate.call_args.kwargs['timeout'], 60)
+        self.assertLessEqual(process.communicate.call_args.kwargs['timeout'], 120)
         self.assertEqual(result['status'], 'complete')
         self.assertEqual(result['groups'][0]['failureIds'], ['a' * 20])
 

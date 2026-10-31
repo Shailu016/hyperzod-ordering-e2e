@@ -63,7 +63,7 @@ class ReportDeliveryTests(unittest.TestCase):
         report_site.write_json(self.project / 'report.json', self.report)
         self.summary['failedTests'][0].update(title=failure['title'], error=failure['error'])
         report_site.write_json(self.input / 'summary.json', self.summary)
-        def explained(failures):
+        def explained(failures, **kwargs):
             facts = failures[0]['technicalFacts']
             self.assertEqual(facts['httpStatuses'], [200])
             self.assertEqual(facts['apiMessage'], 'Unauthorized token.')
@@ -101,7 +101,7 @@ class ReportDeliveryTests(unittest.TestCase):
         self.assertEqual(fallback_metadata['counts'], self.summary['counts'])
 
     def test_optional_ai_reaches_html_and_slack_without_changing_result(self):
-        def explained(failures):
+        def explained(failures, **kwargs):
             groups = report_site.failure_analysis.evidence_groups(failures)
             return {'schemaVersion': 1, 'status': 'complete', 'provider': 'gemini', 'model': 'gemini-3.5-flash-lite',
                 'evidenceHash': report_site.failure_analysis.fingerprint(failures), 'groups': [dict(group,
@@ -129,10 +129,10 @@ class ReportDeliveryTests(unittest.TestCase):
         self.assertEqual(metadata['status'], 'failed')
         root = output / 'bundle' / 'runs' / '123-2'
         self.assertTrue((root / metadata['failures'][0]['screenshot']).is_file())
-        self.assertIn('60-second limit', (root / 'index.html').read_text(encoding='utf-8'))
+        self.assertIn('120-second limit', (root / 'index.html').read_text(encoding='utf-8'))
         payload = notifier.build_payload(report_site.read_json(output / 'notification.json'), self.context(output))
         self.assertIn('Inspect failure', json.dumps(payload))
-        self.assertIn('60-second limit', json.dumps(payload))
+        self.assertIn('120-second limit', json.dumps(payload))
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
