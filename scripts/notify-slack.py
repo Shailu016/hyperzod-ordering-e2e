@@ -249,7 +249,7 @@ def build_payload(summary, context):
             if len(analysis['groups']) > 3:
                 blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'More AI explanations are available in the full report.'}]})
         elif analysis['status'] == 'unavailable':
-            reason = {'timeout': '60-second limit reached', 'authentication': 'API key not accepted', 'quota': 'provider quota reached', 'model-unavailable': 'configured model unavailable'}.get(analysis.get('reason'), 'provider unavailable or invalid response')
+            reason = {'timeout': '120-second limit reached', 'authentication': 'API key not accepted', 'quota': 'provider quota reached', 'model-unavailable': 'configured model unavailable'}.get(analysis.get('reason'), 'provider unavailable or invalid response')
             blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': 'AI explanation unavailable (' + reason + '). Original results and evidence are unchanged.'}]})
     if context.get('E2E_REPORT_PUBLISHER') == 'true' and context.get('E2E_REPORT_PUBLISH_STATUS') != 'success' and not schedule_monitor and not admission_blocked:
         if publication:
