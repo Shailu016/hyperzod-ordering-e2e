@@ -12,6 +12,8 @@ For a local owner, inspect `test-results/<owner>/summary.json` and `.auth/<owner
 
 In the cleanup project only, aborted GETs to the home product-category and merchant-list endpoints remain visible as diagnostic warnings after the exact owned user is deleted and then proved absent. The same events remain critical in commerce projects. This reporting rule is not cleanup proof and cannot authorize lease recovery by itself.
 
+If opening the profile during cleanup receives HTTP 401 from `GET /store/v1/order/getOrdersByUserId` and the app logs out the test identity, cleanup performs one UI re-login of the same identity before trying deletion. The original 401 remains critical in the test report; retrying cleanup does not make the run green. A second logout, identity mismatch, or unproved deletion keeps the lease for reconciliation.
+
 First inspect the exact tag. This is read-only and requires an authenticated `gh` CLI or `E2E_LEASE_TOKEN`:
 
 ```powershell

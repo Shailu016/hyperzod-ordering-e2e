@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { startCapture } = require('../utils/reporting');
+const { startCapture, hasOrderHistoryAuthRejection } = require('../utils/reporting');
 const { assessDiagnostics } = require('../utils/diagnostics');
 
 test('explicit API settlement waits for requests and JSON bodies without hiding a failure', async () => {
@@ -55,6 +55,31 @@ test('deletion evidence requires a successful JSON acknowledgement and chat diag
     assert.deepEqual(capture.successfulAccountDeletions.map((deletion) => deletion.userId), ['123']);
     assert.ok(capture.events.some((event) => event.kind === 'http' && event.url === url));
     assert.ok(capture.events.some((event) => event.kind === 'page' && event.url === url));
+  } finally { if (previous === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = previous; }
+});
+
+test('cleanup auth-loss detector matches only an order-history GET 401', async () => {
+  const previous = process.env.BASE_URL;
+  process.env.BASE_URL = 'https://automations-store.hyperzod.me';
+  try {
+    const page = new EventEmitter(), capture = startCapture(page);
+    const response = (targetPage, path, method, status) => {
+      const url = `https://api.hyperzod.app${path}`;
+      targetPage.emit('response', { url: () => url, status: () => status, headers: () => ({}), request: () => ({ method: () => method, url: () => url }) });
+    };
+    response(page, '/store/v1/order/getOrdersByUserId', 'GET', 401);
+    assert.equal(hasOrderHistoryAuthRejection(page), true);
+    response(page, '/store/v1/order/getOrdersByUserId', 'GET', 500);
+    assert.equal(hasOrderHistoryAuthRejection(page), true, 'the qualifying 401 remains recorded');
+    await capture.finish();
+    assert.ok(assessDiagnostics(capture).critical.some((event) => event.kind === 'http' && event.status === 401), 'the original auth rejection stays critical after cleanup recovery');
+
+    const otherPage = new EventEmitter(), otherCapture = startCapture(otherPage);
+    response(otherPage, '/store/v1/order/getOrdersByUserId', 'POST', 401);
+    assert.equal(hasOrderHistoryAuthRejection(otherPage), false, 'wrong method cannot trigger retry');
+    response(otherPage, '/store/v1/address', 'GET', 401);
+    assert.equal(hasOrderHistoryAuthRejection(otherPage), false, 'unrelated auth failure cannot trigger retry');
+    await otherCapture.finish();
   } finally { if (previous === undefined) delete process.env.BASE_URL; else process.env.BASE_URL = previous; }
 });
 
