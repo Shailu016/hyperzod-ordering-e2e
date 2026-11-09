@@ -1,6 +1,7 @@
 // @ts-check
 const { test, expect } = require("../../fixtures/test.fixture");
 const { ensureLocation, gotoAuthed } = require("../../utils/app");
+const { hasEmptyOrdersState } = require("../../utils/orders-state");
 
 /**
  * Profile / orders / wallet / language @regression @profile.
@@ -24,12 +25,7 @@ test.describe("Profile @profile", () => {
 						)
 						.count();
 					if (refs > 0) return "populated";
-					const empty = await page
-						.locator("#orders")
-						.getByText(/no orders? yet|no order/i)
-						.first()
-						.isVisible()
-						.catch(() => false);
+					const empty = await page.locator("#orders").innerText().then(hasEmptyOrdersState);
 					return empty ? "empty" : "loading";
 				},
 				{ timeout: 30_000, message: "orders list should load" }
