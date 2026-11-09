@@ -6,9 +6,11 @@ const { chromium, webkit } = require('@playwright/test');
 const { dismissSettledLocationDrawer } = require('../utils/location-readiness');
 
 function fixture(mode) {
-  const fullscreen = mode === 'fullscreen' || mode === 'fullscreen-no-location';
+  const fullscreen = mode.includes('fullscreen');
+  const portal = mode.startsWith('portal-');
   const mobile = mode === 'mobile' || fullscreen;
-  const selected = mode !== 'no-location' && mode !== 'fullscreen-no-location';
+  const noLocation = mode === 'no-location' || mode.endsWith('no-location');
+  const selected = !noLocation;
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <style>body{margin:0}header{padding:20px;text-align:right}#LoginBtn{padding:12px}
     .location-overlay{position:fixed;inset:0;background:#0008;z-index:9}
@@ -22,7 +24,7 @@ function fixture(mode) {
     <nav id="stale" class="drawer location-panel v-navigation-drawer--active" style="display:none">
       <div class="v-card-title"><span>Search for your location</span><button id="closeBtn">Close stale twin</button></div>
     </nav>
-    <div class="v-overlay-container"><div id="active-overlay" class="${fullscreen ? 'v-overlay v-overlay--active' : ''}">
+    <div class="v-overlay-container"><div id="active-overlay" class="${fullscreen && !portal ? 'v-overlay v-overlay--active' : ''}">
     <nav id="active" class="drawer ${mobile ? (fullscreen ? 'scheme-location-search-host' : 'v-bottom-sheet v-overlay--active') : 'location-panel v-navigation-drawer--active'}">
       ${fullscreen ? '<div id="mobileLocationSearch"><div class="scheme-location-search__header">Select your location</div><div class="scheme-location-search__scroll">Recent Search</div></div>' : ''}<div class="v-card-title" ${fullscreen ? 'hidden' : ''}><span>Search for your location</span><button ${mobile ? '' : 'id="closeBtn"'}>Close</button></div>
       <input placeholder="Search for area or street name"><p>Indore Active</p>
@@ -66,7 +68,8 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
     let browser;
     try {
       browser = await engine.launch({ headless: true });
-      for (const mode of ['desktop', 'mobile', 'fullscreen', 'fullscreen-no-location', 'offscreen', 'no-location', 'broken']) {
+      for (const mode of ['desktop', 'mobile', 'fullscreen', 'fullscreen-no-location', 'portal-fullscreen', 'portal-fullscreen-no-location', 'offscreen', 'no-location', 'broken']) {
+        const noLocation = mode === 'no-location' || mode.endsWith('no-location');
         const page = await browser.newPage({ viewport: mode === 'mobile' || mode.includes('fullscreen') ? { width: 390, height: 844 } : { width: 1440, height: 900 } });
         await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
         await page.goto(origin + '/en/home?mode=' + mode);
@@ -80,7 +83,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           assert.equal(await page.evaluate(() => window.closeClicks), 1, 'the close UI was exercised but did not dismiss its drawer');
           assert.equal(await page.locator('#active').isVisible(), true);
           assert.equal(await page.evaluate(() => window.loginClicks), 0);
-        } else if (mode === 'no-location' || mode === 'fullscreen-no-location') {
+        } else if (noLocation) {
           assert.equal(await dismissSettledLocationDrawer(page, hasLocation, { timeout: 1000 }), false);
           assert.equal(await page.locator('#active').isVisible(), true);
           assert.equal(await page.evaluate(() => window.closeClicks), 0);

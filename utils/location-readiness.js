@@ -4,12 +4,12 @@ const { expect } = require('@playwright/test');
 // ignore Escape; use the location drawer's own close control, never a store
 // mutation, forced click, or a blanket "close the last dialog" fallback.
 async function dismissSettledLocationDrawer(page, hasSelectedLocation, { timeout = 10_000 } = {}) {
-  // Mobile fullscreen search sheets render inside Vuetify's active overlay;
-  // the host carrying scheme-location-search-host is not necessarily the node
-  // carrying v-overlay--active. Find the active overlay by its actual content,
-  // so a persisted location picker cannot remain over commerce controls.
+  // The mobile search sheet is portaled under v-overlay-container, but the
+  // portal itself does not always carry Vuetify's v-overlay--active class.
+  // Find the container by the visible sheet content that actually intercepts
+  // commerce clicks; do not rely on classes attached to a particular wrapper.
   const searchSheet = page.locator(
-    '.v-overlay-container .v-overlay--active:visible:has(.scheme-location-search__scroll:visible)'
+    '.v-overlay-container:visible:has(.scheme-location-search__scroll:visible)'
   );
   let closedSearch = false;
   if (await searchSheet.count() && await hasSelectedLocation(page)) {
