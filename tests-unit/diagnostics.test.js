@@ -155,3 +155,26 @@ test('Safari CORS-shaped page rejections require a proven discarded read or late
   assert.equal(assess([{ ...cancelled, method: 'POST', url: 'https://api.hyperzod.app/store/v1/cart' }, { ...pageError, url: 'https://api.hyperzod.app/store/v1/cart' }]).critical.length, 2);
   assert.equal(assess([cancelled, { ...pageError, message: 'this.getLoggedInUser is not a function' }]).critical.length, 1);
 });
+
+test('only the optional search-analytics page-level CORS rejection is a warning', () => {
+  const pageError = {
+    kind: 'page', sequence: 138,
+    url: 'https://api.hyperzod.app/store/v1/search/analytics/batch',
+    message: '/api.hyperzod.app/store/v1/search/analytics/batch due to access control checks.',
+  };
+  assert.equal(assess([pageError]).warnings.length, 1);
+  assert.equal(assess([pageError]).critical.length, 0);
+  assert.equal(assess([pageError], { dependencies: ['analytics'] }).critical.length, 1);
+  for (const changed of [
+    { ...pageError, url: 'https://other.example/store/v1/search/analytics/batch' },
+    { ...pageError, url: 'https://api.hyperzod.app/store/v1/search/analytics/other' },
+    { ...pageError, message: 'TypeError: checkout failed' },
+    { ...pageError, kind: 'console' },
+  ]) assert.equal(assess([changed]).critical.length, 1);
+  const httpFailure = {
+    kind: 'http', method: 'POST', status: 500, sequence: 137,
+    url: pageError.url, key: 'search-analytics', message: 'analytics request failed',
+  };
+  assert.equal(assess([httpFailure]).warnings.length, 1, 'the existing optional POST policy remains visible');
+  assert.equal(assess([httpFailure], { dependencies: ['analytics'] }).critical.length, 1);
+});
