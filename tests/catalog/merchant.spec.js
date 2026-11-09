@@ -26,7 +26,9 @@ test('global search returns the exact merchant whose name supplied the query @ca
   await expect(input).toBeVisible();
   await input.fill(name);
   await input.press('Enter');
-  const tab = page.locator('#search-merchant-tab:visible');
+  // The store exposes this selector as an accessible tab; its generated DOM id
+  // is not stable across responsive layouts.
+  const tab = page.getByRole('tablist').getByRole('tab', { name: 'Merchant', exact: true });
   await expect(tab).toBeVisible(); await tab.click();
   const { normalizeText } = require('../../utils/policy');
   const result = page.locator(`#MultiVendorSearch .merchant-card[data-merchant-id="${id}"]:visible`);
