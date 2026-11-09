@@ -96,6 +96,42 @@ test('transient reads recover only when the same request succeeds later; POST do
   assert.equal(assess([event(path, { method: 'POST' })], {}, { [path]: 2 }).critical.length, 1);
   assert.equal(assess([event(path)], {}, { [path]: 0 }).critical.length, 1);
 });
+test('cleanup catalog aborts warn only after matching account deletion is proven', () => {
+  const makeAbort = (path, sequence, extra = {}) => ({
+    kind: 'cancelled', method: 'GET', resourceType: 'xhr', status: undefined,
+    navigationDiscarded: false, sequence, url: `https://api.hyperzod.app${path}`, key: path,
+    message: `TRANSPORT GET https://api.hyperzod.app${path} net::ERR_ABORTED`, ...extra,
+  });
+  const capture = {
+    events: [
+      makeAbort('/store/v1/search/product-category/products', 183),
+      makeAbort('/store/v1/merchant/listByIds', 184),
+    ],
+    successfulReads: {},
+    successfulAccountDeletions: [{ userId: '671761', sequence: 293 }],
+  };
+  const outcome = assessDiagnostics(capture, { deletedUserId: 671761 });
+  assert.equal(outcome.critical.length, 0);
+  assert.equal(outcome.warnings.length, 2);
+  assert.ok(outcome.warnings.every(item => item.diagnosticDisposition === 'cleanup-only-catalog-read-after-proven-deletion'));
+  assert.ok(outcome.warnings.every(item => /net::ERR_ABORTED$/.test(item.message)), 'raw cancellation evidence remains visible');
+  assert.equal(assess(capture.events).critical.length, 2, 'commerce projects still fail on the same cancellations');
+  const consoleOutcome = assessDiagnostics({ ...capture, events: [
+    capture.events[0],
+    { kind: 'console', url: capture.events[0].url, sequence: 185, message: 'Failed to load resource: net::ERR_ABORTED' },
+  ] }, { deletedUserId: 671761 });
+  assert.equal(consoleOutcome.critical.length, 0, 'the matching browser network echo follows the same narrow cleanup disposition');
+
+  const unsafe = [
+    [{ ...capture, successfulAccountDeletions: [] }, { deletedUserId: 671761 }],
+    [capture, { deletedUserId: 123 }],
+    [{ ...capture, events: [makeAbort('/store/v1/search/product-category/products', 294)] }, { deletedUserId: 671761 }],
+    [{ ...capture, events: [makeAbort('/store/v1/cart', 183)] }, { deletedUserId: 671761 }],
+    [{ ...capture, events: [makeAbort('/store/v1/merchant/listByIds', 183, { method: 'POST' })] }, { deletedUserId: 671761 }],
+    [{ ...capture, events: [makeAbort('/store/v1/merchant/listByIds', 183, { message: 'TRANSPORT GET https://api.hyperzod.app/store/v1/merchant/listByIds net::ERR_FAILED' })] }, { deletedUserId: 671761 }],
+  ];
+  for (const [evidence, options] of unsafe) assert.equal(assessDiagnostics(evidence, options).critical.length, evidence.events.length);
+});
 test('negative login permits expected rejection but keeps auth outages and transport failures red', () => {
   const options = { expectedAuthRejection: true }, path = '/auth/v1/user/login';
   assert.equal(assess([event(path, { method: 'POST', status: 401 })], options).warnings.length, 1);

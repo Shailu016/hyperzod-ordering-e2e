@@ -10,6 +10,10 @@ const BACKGROUND = [
 const { recoveredGeocoding } = require('./geocoding-recovery');
 const dependenciesByPage = new WeakMap();
 const recoveredSessions = new WeakSet();
+const CLEANUP_BACKGROUND_READS = new Set([
+  '/store/v1/search/product-category/products',
+  '/store/v1/merchant/listByIds',
+]);
 // These SDK POST endpoints perform searches/validation, never create or change resources.
 const READ_ONLY_POST = /^\/store\/v1\/(home|merchant\/(nearby|nearest|check-delivering)|search\/merchant\/nearby|isStoreServiceable|cart\/validate\/product)$/;
 function isReadRequest(event) { return ['GET', 'HEAD'].includes(event.method) || (event.method === 'POST' && READ_ONLY_POST.test(endpoint(event.url))); }
@@ -28,6 +32,20 @@ function rejection(event, expectedAuthRejection) {
   return expectedAuthRejection && event.method === 'POST' && /^\/auth\/v1\/user\/(login|otp\/verify)$/.test(endpoint(event.url)) &&
     ((event.kind === 'http' && [400, 401, 422].includes(event.status)) || event.kind === 'application');
 }
+/**
+ * These read-only home-catalog requests can be abandoned while the cleanup
+ * project moves into account controls. Keep the cancellation visible, but only
+ * warn after the exact owned account was deleted and independently proved
+ * absent. The same cancellation remains critical in commerce projects.
+ */
+function completedCleanupCatalogAbort(event, capture, deletedUserId) {
+  if (deletedUserId == null || event.kind !== 'cancelled' || event.method !== 'GET' ||
+      event.resourceType !== 'xhr' || event.navigationDiscarded !== false || event.status != null ||
+      !CLEANUP_BACKGROUND_READS.has(endpoint(event.url)) ||
+      !/^TRANSPORT GET https:\/\/api\.hyperzod\.app\/store\/v1\/(?:search\/product-category\/products|merchant\/listByIds) net::ERR_ABORTED$/.test(event.message)) return false;
+  return (capture.successfulAccountDeletions || []).some((deletion) =>
+    String(deletion.userId) === String(deletedUserId) && deletion.sequence > event.sequence);
+}
 /** @param {{events: Array<any>, successfulReads: Record<string, number>, successfulAccountDeletions?: Array<{userId: string, sequence: number}>, geocodingRecoveries?: Array<any>}} capture @param {{page?: object, dependencies?: string[], expectedAuthRejection?: boolean, expectedMissingPage?: boolean, deletedUserId?: string | number}} [options] */
 function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejection = false, expectedMissingPage = false, deletedUserId } = {}) {
   const required = new Set([...dependencies, ...(dependenciesByPage.get(page) || [])]);
@@ -40,7 +58,8 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
     // changes. Preserve those as warnings; API/script/document failures still
     // require navigation or recovery evidence.
     const discardedImage = event.kind === 'cancelled' && event.method === 'GET' && event.resourceType === 'image';
-    let warning = recoveredGeocoding(event, capture.geocodingRecoveries) || discardedImage || (event.kind === 'cancelled' && event.navigationDiscarded && isReadRequest(event)) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
+    const cleanupCatalogAbort = completedCleanupCatalogAbort(event, capture, deletedUserId);
+    let warning = recoveredGeocoding(event, capture.geocodingRecoveries) || discardedImage || cleanupCatalogAbort || (event.kind === 'cancelled' && event.navigationDiscarded && isReadRequest(event)) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
     if (expectedMissingPage && event.kind === 'application' && event.method === 'GET' && endpoint(event.url) === '/store/v1/page' && /"Page not found"$/.test(event.message)) warning = true;
     // A later successful response can recover a read, never a cart/order mutation.
     const read = isReadRequest(event);
@@ -54,7 +73,7 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
       const related = failures.filter((failure) => event.url ? failure.url === event.url : event.kind === 'console' && resourceError);
       // Deduplicate browser network messages only when every corresponding failure is allowed.
       warning = resourceError && related.length > 0 && related.every((failure) =>
-        optionalFailure(failure, required) || rejection(failure, expectedAuthRejection) || revokedAddressRead(failure) ||
+        optionalFailure(failure, required) || rejection(failure, expectedAuthRejection) || revokedAddressRead(failure) || completedCleanupCatalogAbort(failure, capture, deletedUserId) ||
         (failure.kind === 'cancelled' && failure.navigationDiscarded && isReadRequest(failure)) ||
         (isReadRequest(failure) && (capture.successfulReads[failure.key] || 0) > failure.sequence));
       // WebKit can emit only a page rejection for this cross-origin credential read.
@@ -79,7 +98,9 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
           endpoint(failure.url) === '/store/v1/promotional/coupons/available' && failure.sequence + 1 === event.sequence);
       }
     }
-    (warning ? warnings : critical).push(event);
+    (warning ? warnings : critical).push(cleanupCatalogAbort
+      ? { ...event, diagnosticDisposition: 'cleanup-only-catalog-read-after-proven-deletion' }
+      : event);
   }
   return { critical, warnings };
 }
