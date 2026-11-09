@@ -10,6 +10,8 @@ A confirmed conflict reports **Test account locked / Tests did not start**, with
 
 For a local owner, inspect `test-results/<owner>/summary.json` and `.auth/<owner>-<project>/manifest.json` on its host, and confirm no runner or Playwright child remains active. A summary stuck at `running` is evidence of interruption, not proof the process is inactive. `setup-started` without a user ID does not prove the account is absent. Use the existing cleanup project under the same owner and identity to obtain `absent-proven` or `deleted-and-proven`; inspect all recorded orders and any submission attempt before recovery. Never create a replacement account or place another order merely to recover a lock.
 
+In the cleanup project only, aborted GETs to the home product-category and merchant-list endpoints remain visible as diagnostic warnings after the exact owned user is deleted and then proved absent. The same events remain critical in commerce projects. This reporting rule is not cleanup proof and cannot authorize lease recovery by itself.
+
 First inspect the exact tag. This is read-only and requires an authenticated `gh` CLI or `E2E_LEASE_TOKEN`:
 
 ```powershell
