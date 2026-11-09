@@ -8,9 +8,12 @@ async function dismissSettledLocationDrawer(page, hasSelectedLocation, { timeout
   // portal itself does not always carry Vuetify's v-overlay--active class.
   // Find the container by the visible sheet content that actually intercepts
   // commerce clicks; do not rely on classes attached to a particular wrapper.
-  const searchSheet = page.locator(
-    '.v-overlay-container:visible:has(.scheme-location-search__scroll:visible)'
-  );
+  // Vuetify's portal wrapper can be `display: contents` (and therefore have
+  // no visible bounding box) while its positioned children still cover the
+  // page and intercept clicks. Match the visible sheet content, then scope to
+  // its portal without requiring the wrapper itself to be visible.
+  const searchContent = page.locator('.scheme-location-search__scroll:visible');
+  const searchSheet = page.locator('.v-overlay-container').filter({ has: searchContent });
   let closedSearch = false;
   if (await searchSheet.count() && await hasSelectedLocation(page)) {
     await expect(searchSheet, 'one active mobile location search sheet').toHaveCount(1, { timeout });

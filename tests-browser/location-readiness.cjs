@@ -15,7 +15,7 @@ function fixture(mode) {
     <style>body{margin:0}header{padding:20px;text-align:right}#LoginBtn{padding:12px}
     .location-overlay{position:fixed;inset:0;background:#0008;z-index:9}
     .drawer{position:fixed;inset:0 auto 0 0;width:80%;max-width:480px;background:white;z-index:10}
-    .v-overlay-container{position:fixed;inset:0;z-index:10;pointer-events:none}.v-overlay{position:fixed;inset:0;pointer-events:none}.v-overlay.v-overlay--active{pointer-events:auto}
+    .v-overlay-container{position:fixed;inset:0;z-index:10;pointer-events:none;${portal ? 'display:contents;' : ''}}.v-overlay{position:fixed;inset:0;pointer-events:none}.v-overlay.v-overlay--active{pointer-events:auto}
     .drawer{pointer-events:auto}
     .v-card-title{display:flex;justify-content:space-between;padding:15px}.v-card-title button{padding:12px}
     #loginEmailOrNumber{position:fixed;top:100px;right:20px}</style></head><body>
@@ -73,6 +73,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         const page = await browser.newPage({ viewport: mode === 'mobile' || mode.includes('fullscreen') ? { width: 390, height: 844 } : { width: 1440, height: 900 } });
         await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
         await page.goto(origin + '/en/home?mode=' + mode);
+        if (mode.startsWith('portal-')) assert.equal(await page.locator('.v-overlay-container').isVisible(), false, 'a display:contents portal has no visible wrapper box');
         const selected = () => page.evaluate(() => localStorage.getItem('location'));
         const before = await selected();
         const hasLocation = async () => !!(await selected());

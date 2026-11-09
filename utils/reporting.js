@@ -197,6 +197,14 @@ async function confirmGeocodingRecovery(page, query) {
   if (!selection || !geocoding.coordinateHash(selection.selected) || geocoding.coordinateHash(selection.selected) !== geocoding.coordinateHash(selection.persisted)) return false;
   return capture.confirmGeocoding(query, selection.selected);
 }
+function hasOrderHistoryAuthRejection(page) {
+  const capture = capturesByPage.get(page);
+  return !!capture?.events.some((event) => {
+    if (event.kind !== 'http' || event.method !== 'GET' || event.status !== 401) return false;
+    try { return new URL(event.url).pathname === '/store/v1/order/getOrdersByUserId'; }
+    catch { return false; }
+  });
+}
 async function visibleToastText(page) { return redact((await page.locator('.v-snackbar__content, #app-snackbar, .alert-message').allInnerTexts()).join(' | ')).slice(0, 400); }
 async function reportFailure(testInfo, page, capture, error) {
   try {
@@ -208,4 +216,4 @@ async function reportFailure(testInfo, page, capture, error) {
     await testInfo.attach('console-log', { path: destination, contentType: 'text/plain' });
   } catch { /* do not replace the original test error */ }
 }
-module.exports = { startCapture, settlePageRequests, confirmGeocodingRecovery, visibleToastText, reportFailure };
+module.exports = { startCapture, settlePageRequests, confirmGeocodingRecovery, hasOrderHistoryAuthRejection, visibleToastText, reportFailure };

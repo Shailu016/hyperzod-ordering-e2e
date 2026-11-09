@@ -32,6 +32,14 @@ function rejection(event, expectedAuthRejection) {
   return expectedAuthRejection && event.method === 'POST' && /^\/auth\/v1\/user\/(login|otp\/verify)$/.test(endpoint(event.url)) &&
     ((event.kind === 'http' && [400, 401, 422].includes(event.status)) || event.kind === 'application');
 }
+function optionalAnalyticsPageRejection(event, dependencies) {
+  if (event.kind !== 'page' || dependencies.has('analytics') ||
+      !/due to access control checks|blocked by CORS policy/i.test(event.message)) return false;
+  try {
+    const url = new URL(event.url);
+    return url.hostname === 'api.hyperzod.app' && url.pathname === '/store/v1/search/analytics/batch';
+  } catch { return false; }
+}
 /**
  * These read-only home-catalog requests can be abandoned while the cleanup
  * project moves into account controls. Keep the cancellation visible, but only
@@ -97,6 +105,11 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
         warning = failures.some((failure) => failure.kind === 'cancelled' && failure.navigationDiscarded && failure.method === 'GET' &&
           endpoint(failure.url) === '/store/v1/promotional/coupons/available' && failure.sequence + 1 === event.sequence);
       }
+      // Safari may surface a page-level CORS rejection for this optional
+      // search telemetry POST without emitting a request event. Keep the raw
+      // browser diagnostic visible as a warning; other hosts, paths, messages,
+      // and any scenario that declares analytics as required remain critical.
+      if (optionalAnalyticsPageRejection(event, required)) warning = true;
     }
     (warning ? warnings : critical).push(cleanupCatalogAbort
       ? { ...event, diagnosticDisposition: 'cleanup-only-catalog-read-after-proven-deletion' }
