@@ -4,14 +4,20 @@ const { expect } = require('@playwright/test');
 // ignore Escape; use the location drawer's own close control, never a store
 // mutation, forced click, or a blanket "close the last dialog" fallback.
 async function dismissSettledLocationDrawer(page, hasSelectedLocation, { timeout = 10_000 } = {}) {
-  // Mobile uses a separate fullscreen searchModal, titled "Select your
-  // location". Its Back header closes only searchModal through the UI.
-  const searchSheet = page.locator('.scheme-location-search-host.v-overlay--active')
-    .filter({ has: page.locator('#mobileLocationSearch .scheme-location-search__header') }).filter({ visible: true });
+  // Mobile fullscreen search sheets render inside Vuetify's active overlay;
+  // the host carrying scheme-location-search-host is not necessarily the node
+  // carrying v-overlay--active. Find the active overlay by its actual content,
+  // so a persisted location picker cannot remain over commerce controls.
+  const searchSheet = page.locator(
+    '.v-overlay-container .v-overlay--active:visible:has(.scheme-location-search__scroll:visible)'
+  );
   let closedSearch = false;
   if (await searchSheet.count() && await hasSelectedLocation(page)) {
     await expect(searchSheet, 'one active mobile location search sheet').toHaveCount(1, { timeout });
-    await searchSheet.locator('#mobileLocationSearch .scheme-location-search__header').click({ timeout });
+    const header = searchSheet.locator('.scheme-location-search__header:visible')
+      .filter({ hasText: /select your location/i });
+    await expect(header, 'mobile location sheet back header').toHaveCount(1, { timeout });
+    await header.click({ timeout });
     await expect(searchSheet, 'mobile location search must close before continuing').toHaveCount(0, { timeout });
     if (!await hasSelectedLocation(page)) throw new Error('Closing mobile location search lost the selected location');
     closedSearch = true;

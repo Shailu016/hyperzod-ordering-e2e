@@ -5,7 +5,8 @@
  * implementation instead of copy-paste.
  */
 const { expect } = require("@playwright/test");
-const { API, ensureLoggedIn, gotoWithRetry } = require("../utils/app");
+const { API, ensureLoggedIn, gotoWithRetry, hasSelectedLocation } = require("../utils/app");
+const { dismissSettledLocationDrawer } = require("../utils/location-readiness");
 const { observeUntil } = require("../utils/observe");
 const { SESSION_RENEWED, SessionRenewedError, isSessionRenewed, recoverBeforeSubmission } = require("../utils/session-recovery");
 
@@ -104,6 +105,10 @@ async function addFirstProductToCart(page) {
 		await require("../utils/app").waitForAppBoot(page);
 	}
 	await ensureEmptyCart(page);
+	// A selected location can reopen its fullscreen sheet after the boot-time
+	// readiness check. Close that exact UI sheet before a commerce click so an
+	// overlay cannot silently intercept the add button.
+	await dismissSettledLocationDrawer(page, hasSelectedLocation);
 	const add = page.locator(".add-product-btn .add-btn:visible").first();
 	await expect(add, "merchant menu hydration").toBeEnabled({ timeout: 60_000 });
 	let response, responseError;

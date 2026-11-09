@@ -6,11 +6,15 @@ const { chromium, webkit } = require('@playwright/test');
 const { dismissSettledLocationDrawer } = require('../utils/location-readiness');
 
 function fixture(mode) {
-  const mobile = mode === 'mobile' || mode === 'fullscreen';
+  const fullscreen = mode === 'fullscreen' || mode === 'fullscreen-no-location';
+  const mobile = mode === 'mobile' || fullscreen;
+  const selected = mode !== 'no-location' && mode !== 'fullscreen-no-location';
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <style>body{margin:0}header{padding:20px;text-align:right}#LoginBtn{padding:12px}
     .location-overlay{position:fixed;inset:0;background:#0008;z-index:9}
     .drawer{position:fixed;inset:0 auto 0 0;width:80%;max-width:480px;background:white;z-index:10}
+    .v-overlay-container{position:fixed;inset:0;z-index:10;pointer-events:none}.v-overlay{position:fixed;inset:0;pointer-events:none}.v-overlay.v-overlay--active{pointer-events:auto}
+    .drawer{pointer-events:auto}
     .v-card-title{display:flex;justify-content:space-between;padding:15px}.v-card-title button{padding:12px}
     #loginEmailOrNumber{position:fixed;top:100px;right:20px}</style></head><body>
     <header><button id="LoginBtn">Login</button></header><input id="loginEmailOrNumber" hidden>
@@ -18,22 +22,24 @@ function fixture(mode) {
     <nav id="stale" class="drawer location-panel v-navigation-drawer--active" style="display:none">
       <div class="v-card-title"><span>Search for your location</span><button id="closeBtn">Close stale twin</button></div>
     </nav>
-    <nav id="active" class="drawer ${mobile ? 'v-bottom-sheet v-overlay--active' + (mode === 'fullscreen' ? ' scheme-location-search-host' : '') : 'location-panel v-navigation-drawer--active'}">
-      ${mode === 'fullscreen' ? '<div id="mobileLocationSearch"><div class="scheme-location-search__header">Select your location</div></div>' : ''}<div class="v-card-title" ${mode === 'fullscreen' ? 'hidden' : ''}><span>Search for your location</span><button ${mobile ? '' : 'id="closeBtn"'}>Close</button></div>
+    <div class="v-overlay-container"><div id="active-overlay" class="${fullscreen ? 'v-overlay v-overlay--active' : ''}">
+    <nav id="active" class="drawer ${mobile ? (fullscreen ? 'scheme-location-search-host' : 'v-bottom-sheet v-overlay--active') : 'location-panel v-navigation-drawer--active'}">
+      ${fullscreen ? '<div id="mobileLocationSearch"><div class="scheme-location-search__header">Select your location</div><div class="scheme-location-search__scroll">Recent Search</div></div>' : ''}<div class="v-card-title" ${fullscreen ? 'hidden' : ''}><span>Search for your location</span><button ${mobile ? '' : 'id="closeBtn"'}>Close</button></div>
       <input placeholder="Search for area or street name"><p>Indore Active</p>
       <section><div class="v-card-title"><span>Edit Address</span><button id="nested-close">Close nested editor</button></div></section>
-    </nav>
+    </nav></div></div>
     <div id="auth-scrim" class="location-overlay" style="left:99%;pointer-events:none"></div>
     <nav id="auth-side-panel" hidden></nav>
     <script>
       window.closeClicks=0;window.loginClicks=0;window.nestedCloseClicks=0;
       localStorage.clear();
-      ${mode !== 'no-location' ? `localStorage.setItem('location',JSON.stringify({id:'fixture-location',label:'Indore'}));` : ''}
+      ${selected ? `localStorage.setItem('location',JSON.stringify({id:'fixture-location',label:'Indore'}));` : ''}
       // The actual custom drawer does not close through Escape.
       document.addEventListener('keydown',event=>{if(event.key==='Escape')event.preventDefault()});
-      document.querySelector('${mode === 'fullscreen' ? '#active .scheme-location-search__header' : '#active .v-card-title button'}').onclick=()=>{
+      document.querySelector('${fullscreen ? '#active .scheme-location-search__header' : '#active .v-card-title button'}').onclick=()=>{
         window.closeClicks++;
         ${mode === 'broken' ? '' : `document.querySelector('#active').classList.remove('v-navigation-drawer--active','v-overlay--active');
+        document.querySelector('#active-overlay').classList.remove('v-overlay--active');
         document.querySelector('#active').style.${mode === 'offscreen' ? "transform='translateX(-110%)'" : "display='none'"};document.querySelector('.location-overlay').style.display='none';`}
       };
       document.querySelector('#stale button').onclick=()=>{throw Error('Hidden drawer must never be clicked')};
@@ -60,8 +66,8 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
     let browser;
     try {
       browser = await engine.launch({ headless: true });
-      for (const mode of ['desktop', 'mobile', 'fullscreen', 'offscreen', 'no-location', 'broken']) {
-        const page = await browser.newPage({ viewport: mode === 'mobile' ? { width: 390, height: 844 } : { width: 1440, height: 900 } });
+      for (const mode of ['desktop', 'mobile', 'fullscreen', 'fullscreen-no-location', 'offscreen', 'no-location', 'broken']) {
+        const page = await browser.newPage({ viewport: mode === 'mobile' || mode.includes('fullscreen') ? { width: 390, height: 844 } : { width: 1440, height: 900 } });
         await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
         await page.goto(origin + '/en/home?mode=' + mode);
         const selected = () => page.evaluate(() => localStorage.getItem('location'));
@@ -74,7 +80,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           assert.equal(await page.evaluate(() => window.closeClicks), 1, 'the close UI was exercised but did not dismiss its drawer');
           assert.equal(await page.locator('#active').isVisible(), true);
           assert.equal(await page.evaluate(() => window.loginClicks), 0);
-        } else if (mode === 'no-location') {
+        } else if (mode === 'no-location' || mode === 'fullscreen-no-location') {
           assert.equal(await dismissSettledLocationDrawer(page, hasLocation, { timeout: 1000 }), false);
           assert.equal(await page.locator('#active').isVisible(), true);
           assert.equal(await page.evaluate(() => window.closeClicks), 0);
