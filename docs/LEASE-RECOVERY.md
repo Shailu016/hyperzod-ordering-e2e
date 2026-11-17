@@ -1,6 +1,6 @@
 # Lease recovery runbook
 
-The identity lease is a Git tag named `e2e-lease-<24 hex characters>`. A failed process can leave it behind. Never delete a lease by age alone: the owner may still be mutating the shared account.
+The identity lease is a Git tag named `e2e-lease-<24 hex characters>`. A runner normally releases its own lease. A failed process can leave it behind. A lease is retained after a completed run only when an order was recorded, a submission attempt is ambiguous, or lifecycle evidence is missing; a cleanup failure with no recorded order attempt releases the lease because the next signup purges the leftover shared identity. Never delete a retained lease by age alone: the owner may still be mutating the shared account.
 
 A failed setup before any identity access can release its own lease only when the versioned, monotonic access journal explicitly records `false`, the scope matches, and the completed Playwright report proves failed setup with no executed business tests. This records `leaseReleaseReason=identity-access-never-started`; it does not claim the account absent or change failed tests to passing. Missing/legacy evidence, identity access, user IDs, order attempts, or recorded orders cannot use this exception. Genuine unresolved cleanup still retains the lease.
 

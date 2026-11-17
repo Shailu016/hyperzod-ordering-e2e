@@ -8,7 +8,7 @@ const policy = require('../utils/policy');
 const lifecycle = require('../utils/lifecycle');
 
 test('pre-auth runner failure releases only proven untouched identity, never continues or reports green', async () => {
-  for (const mode of ['untouched', 'accessed', 'legacy', 'missing-report', 'executed-main']) {
+  for (const mode of ['untouched', 'accessed', 'accessed-no-order', 'legacy', 'missing-report', 'executed-main']) {
     const filename = path.resolve(__dirname, '../scripts/run-suite.js');
     const writes = new Map();
     const env = { GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: '123', BASE_URL: 'https://test.example', E2E_ALLOWED_ORIGINS: 'https://test.example', TEST_USER_EMAIL: 'shared@example.invalid' };
@@ -28,7 +28,7 @@ test('pre-auth runner failure releases only proven untouched identity, never con
       } },
       'node:child_process': { spawn() { spawned++; const child = new EventEmitter(); queueMicrotask(() => child.emit('exit', 1)); return child; } },
       '../utils/lease': { async acquireLease() { return async () => { released++; }; } },
-      '../utils/manifest': { exportManifest(id) { return { runId: id, origin: env.BASE_URL, key: policy.identityKey(env.BASE_URL, env.TEST_USER_EMAIL), lifecycle: 'cleanup-unresolved', orders: [], ...(mode === 'legacy' ? {} : { identityAccessJournalVersion: 1, identityAccessStarted: mode === 'accessed' }) }; } },
+      '../utils/manifest': { exportManifest(id) { return { runId: id, origin: env.BASE_URL, key: policy.identityKey(env.BASE_URL, env.TEST_USER_EMAIL), lifecycle: 'cleanup-unresolved', orders: [], ...(mode === 'legacy' ? {} : { identityAccessJournalVersion: 1, identityAccessStarted: ['accessed', 'accessed-no-order'].includes(mode) }), ...(mode === 'accessed-no-order' ? { userId: 680435 } : {}) }; } },
       '../utils/policy': policy,
       '../utils/lifecycle': lifecycle,
       './summarize': require('../scripts/summarize'),
@@ -45,8 +45,10 @@ test('pre-auth runner failure releases only proven untouched identity, never con
     assert.equal(process.exitCode, 1, mode);
     assert.notEqual(summary.status, 'passed', mode);
     assert.equal(summary.outcomes.length, 1, mode);
-    assert.equal(released, mode === 'untouched' ? 1 : 0, mode);
-    assert.equal(summary.leaseReleaseReason, mode === 'untouched' ? 'identity-access-never-started' : undefined, mode);
-    assert.equal(Boolean(summary.leaseRetainedReason), mode !== 'untouched', mode);
+    const releasedModes = new Set(['untouched', 'accessed-no-order']);
+    const releaseReasons = { untouched: 'identity-access-never-started', 'accessed-no-order': 'cleanup-unresolved-without-mutation' };
+    assert.equal(released, releasedModes.has(mode) ? 1 : 0, mode);
+    assert.equal(summary.leaseReleaseReason, releaseReasons[mode], mode);
+    assert.equal(Boolean(summary.leaseRetainedReason), !releasedModes.has(mode), mode);
   }
 });

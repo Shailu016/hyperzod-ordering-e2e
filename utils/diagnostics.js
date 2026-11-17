@@ -10,7 +10,7 @@ const BACKGROUND = [
 const { recoveredGeocoding } = require('./geocoding-recovery');
 const dependenciesByPage = new WeakMap();
 const recoveredSessions = new WeakSet();
-const CLEANUP_BACKGROUND_READS = new Set([
+const CATALOG_READS = new Set([
   '/store/v1/search/product-category/products',
   '/store/v1/merchant/listByIds',
 ]);
@@ -49,7 +49,7 @@ function optionalAnalyticsPageRejection(event, dependencies) {
 function completedCleanupCatalogAbort(event, capture, deletedUserId) {
   if (deletedUserId == null || event.kind !== 'cancelled' || event.method !== 'GET' ||
       event.resourceType !== 'xhr' || event.navigationDiscarded !== false || event.status != null ||
-      !CLEANUP_BACKGROUND_READS.has(endpoint(event.url)) ||
+      !CATALOG_READS.has(endpoint(event.url)) ||
       !/^TRANSPORT GET https:\/\/api\.hyperzod\.app\/store\/v1\/(?:search\/product-category\/products|merchant\/listByIds) net::ERR_ABORTED$/.test(event.message)) return false;
   return (capture.successfulAccountDeletions || []).some((deletion) =>
     String(deletion.userId) === String(deletedUserId) && deletion.sequence > event.sequence);
@@ -70,9 +70,13 @@ function assessDiagnostics(capture, { page, dependencies = [], expectedAuthRejec
     let warning = recoveredGeocoding(event, capture.geocodingRecoveries) || discardedImage || cleanupCatalogAbort || (event.kind === 'cancelled' && event.navigationDiscarded && isReadRequest(event)) || optionalFailure(event, required) || rejection(event, expectedAuthRejection);
     if (expectedMissingPage && event.kind === 'application' && event.method === 'GET' && endpoint(event.url) === '/store/v1/page' && /"Page not found"$/.test(event.message)) warning = true;
     // A later successful response can recover a read, never a cart/order mutation.
+    // The home catalog is re-fetched on client-side route changes, so a cancelled
+    // duplicate is benign when the identical catalog read already succeeded. Other
+    // reads still require a later successful request.
     const read = isReadRequest(event);
+    const successful = capture.successfulReads[event.key] || 0;
     const transient = ['transport', 'cancelled'].includes(event.kind) || (event.kind === 'http' && [429, 500, 502, 503, 504].includes(event.status));
-    if (read && transient && (capture.successfulReads[event.key] || 0) > event.sequence) warning = true;
+    if (read && transient && (successful > event.sequence || (event.kind === 'cancelled' && CATALOG_READS.has(endpoint(event.url)) && successful > 0))) warning = true;
     if (read && event.kind === 'http' && event.status === 401 && recoveredSessions.has(page) && (capture.successfulReads[event.key] || 0) > event.sequence) warning = true;
     // Only a positively deleted-and-proven owned account can explain a late address 401.
     if (revokedAddressRead(event)) warning = true;
