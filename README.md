@@ -40,7 +40,7 @@ npm run test:smoke
 
 The runner does not send notifications. `E2E_NOTIFICATIONS_DISABLED=true` also blocks the standalone notifier.
 `E2E_ENV_FILE` can select an existing private env file without copying it into another checkout.
-Missing cleanup proof or an ambiguous order stops subsequent devices and retains the lease for audited reconciliation.
+Missing cleanup proof or an ambiguous order stops subsequent devices. An ambiguous or recorded order retains the lease for audited reconciliation; a cleanup failure that recorded no order attempt releases it because the next signup purges the leftover shared identity and proves it gone before creating a fresh account.
 The narrow exception is a completed setup failure proven to precede all identity access, with matching scope and an explicit untouched access journal. It stops the suite, preserves the failure, and releases only its own lease without claiming account absence. Location readiness also requires dismissing an optional location drawer through its own header close control before auth navigation; a mandatory picker is never dismissed without a selected location.
 Set `E2E_ISOLATED_IDENTITY=false` locally only when deliberately testing the shared account; an interrupted run can block scheduled executions until recovery. Isolation does not replace cleanup: inspect an interrupted local run's `.auth/<runId>-<project>/manifest.json`, reconcile any account/orders, and recover its exact lease through the runbook. Never delete a lock merely because it is old.
 HTTP 429 cooldowns honor `Retry-After` and persist across workers/devices; no cart, account or order mutation is replayed.

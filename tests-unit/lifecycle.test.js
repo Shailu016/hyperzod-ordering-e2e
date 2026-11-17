@@ -1,10 +1,34 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { requiresReconciliation, identityAccessNeverStarted } = require('../utils/lifecycle');
+const { requiresReconciliation, identityAccessNeverStarted, cleanupUnresolvedWithoutMutation } = require('../utils/lifecycle');
 test('ambiguous submission and missing cleanup proof block the next device and retain the lease', () => {
   for (const resource of [undefined, { lifecycle: 'authenticated' }, { lifecycle: 'cleanup-unresolved' }, { lifecycle: 'deleted-and-proven', submissionAttempted: {}, orders: [] }]) assert.equal(requiresReconciliation(resource), true);
   assert.equal(requiresReconciliation({ lifecycle: 'absent-proven', orders: [] }), false);
   assert.equal(requiresReconciliation({ lifecycle: 'deleted-and-proven', submissionAttempted: {}, orders: [{ orderId: 123 }] }), false);
+});
+
+test('an unresolved cleanup with no order attempt releases the lease for the next signup to reconcile', () => {
+  // Production incident: storefront boot failure left the created test identity
+  // behind, but no order or submission was ever attempted.
+  const resource = { lifecycle: 'cleanup-unresolved', userId: 680435, orders: [], identityAccessJournalVersion: 1, identityAccessStarted: true };
+  assert.equal(requiresReconciliation(resource), true);
+  assert.equal(cleanupUnresolvedWithoutMutation(resource), true);
+  for (const change of [
+    { identityAccessJournalVersion: undefined },
+    { identityAccessStarted: false },
+    { identityAccessStarted: undefined },
+    { userId: undefined },
+    { userId: null },
+    { userId: 0 },
+    { submissionAttempted: {} },
+    { submissionAttempted: { cartId: 42, userId: 680435 } },
+    { orders: [{ orderId: 123 }] },
+    { orders: undefined },
+    { orders: null },
+    { lifecycle: 'authenticated' },
+    { lifecycle: 'setup-started' },
+  ]) assert.equal(cleanupUnresolvedWithoutMutation({ ...resource, ...change }), false, JSON.stringify(change));
+  assert.equal(cleanupUnresolvedWithoutMutation(undefined), false);
 });
 
 function preauthFixture() {

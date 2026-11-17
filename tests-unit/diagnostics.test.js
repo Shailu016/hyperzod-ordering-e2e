@@ -96,6 +96,21 @@ test('transient reads recover only when the same request succeeds later; POST do
   assert.equal(assess([event(path, { method: 'POST' })], {}, { [path]: 2 }).critical.length, 1);
   assert.equal(assess([event(path)], {}, { [path]: 0 }).critical.length, 1);
 });
+test('a cancelled home-catalog read warns when the identical read already succeeded, without recovering mutations', () => {
+  const path = '/store/v1/search/product-category/products';
+  const cancelled = {
+    kind: 'cancelled', method: 'GET', resourceType: 'xhr', status: undefined,
+    navigationDiscarded: false, sequence: 160, url: `https://api.hyperzod.app${path}`, key: path,
+    message: `TRANSPORT GET https://api.hyperzod.app${path} net::ERR_ABORTED`,
+  };
+  assert.equal(assess([cancelled], {}, { [path]: 111 }).warnings.length, 1);
+  assert.equal(assess([cancelled], {}, { [path]: 0 }).critical.length, 1);
+  assert.equal(assess([cancelled], {}, {}).critical.length, 1);
+  assert.equal(assess([{ ...cancelled, method: 'POST' }], {}, { [path]: 111 }).critical.length, 1);
+  assert.equal(assess([cancelled], {}, { [path + '?other']: 111 }).critical.length, 1);
+  assert.equal(assess([{ ...cancelled, url: 'https://api.hyperzod.app/store/v1/promotional/coupons/available', key: 'coupon' }], {}, { coupon: 111 }).critical.length, 1, 'other reads still require a later success');
+});
+
 test('cleanup catalog aborts warn only after matching account deletion is proven', () => {
   const makeAbort = (path, sequence, extra = {}) => ({
     kind: 'cancelled', method: 'GET', resourceType: 'xhr', status: undefined,

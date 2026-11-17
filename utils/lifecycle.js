@@ -4,6 +4,17 @@ function requiresReconciliation(resource) {
   if (resource.submissionAttempted && !resource.orders?.length) return true;
   return !['absent-proven', 'deleted-and-proven'].includes(resource.lifecycle);
 }
+/** An unresolved cleanup with a known, accessed test identity but no order attempt
+ *  leaves only that shared identity. The next signup logs in, deletes it and proves
+ *  it gone before creating a fresh account, so no operator reconciliation is required.
+ *  Legacy manifests, unknown identities, recorded or ambiguous submissions retain it. */
+function cleanupUnresolvedWithoutMutation(resource) {
+  if (!resource || resource.lifecycle !== 'cleanup-unresolved') return false;
+  if (resource.identityAccessJournalVersion !== 1 || resource.identityAccessStarted !== true) return false;
+  if (!Number.isInteger(resource.userId) || resource.userId <= 0) return false;
+  if (resource.submissionAttempted) return false;
+  return Array.isArray(resource.orders) && resource.orders.length === 0;
+}
 /** A failed public-navigation setup can release its lease without asserting account absence. */
 function identityAccessNeverStarted(resource, expected, report, project) {
   if (!resource || !expected || !report || !Array.isArray(report.suites) || !Array.isArray(report.errors) || report.errors.length) return false;
@@ -38,4 +49,4 @@ function identityAccessNeverStarted(resource, expected, report, project) {
   }
   return failedSetup === 1 && cleanup === 1;
 }
-module.exports = { requiresReconciliation, identityAccessNeverStarted };
+module.exports = { requiresReconciliation, identityAccessNeverStarted, cleanupUnresolvedWithoutMutation };

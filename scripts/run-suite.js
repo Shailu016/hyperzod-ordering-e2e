@@ -8,7 +8,7 @@ const { acquireLease } = require('../utils/lease');
 const { exportManifest } = require('../utils/manifest');
 const { assertAllowedTarget, identityKey } = require('../utils/policy');
 const { summarizeReports } = require('./summarize');
-const { requiresReconciliation, identityAccessNeverStarted } = require('../utils/lifecycle');
+const { requiresReconciliation, identityAccessNeverStarted, cleanupUnresolvedWithoutMutation } = require('../utils/lifecycle');
 const ROOT = path.resolve(__dirname, '..');
 const SUITES = { signup: ['setup'], smoke: ['web'], web: ['web'], android: ['android'], ios: ['ios'], mobile: ['android', 'ios'], all: ['web', 'android', 'ios'] };
 async function run(suite = process.argv[2]) {
@@ -65,17 +65,22 @@ async function run(suite = process.argv[2]) {
       try { resource = exportManifest(`${runId}-${project}`, projectDir); }
       catch (error) { result.exitCode = 1; result.error = `Lifecycle evidence export failed: ${error.message}`; }
       reconciliationRequired = requiresReconciliation(resource);
-      let noIdentityAccess = false;
+      let stopRemaining = false;
       if (reconciliationRequired) {
         try {
           const report = JSON.parse(fs.readFileSync(path.join(projectDir, 'report.json'), 'utf8'));
-          noIdentityAccess = identityAccessNeverStarted(resource, { runId: `${runId}-${project}`, origin, key: identityKey(origin, process.env.TEST_USER_EMAIL) }, report, project);
+          const noIdentityAccess = identityAccessNeverStarted(resource, { runId: `${runId}-${project}`, origin, key: identityKey(origin, process.env.TEST_USER_EMAIL) }, report, project);
+          if (noIdentityAccess) { reconciliationRequired = false; leaseReleaseReason = 'identity-access-never-started'; stopRemaining = true; }
         } catch { /* Missing/invalid report cannot establish untouched identity. */ }
-        if (noIdentityAccess) { reconciliationRequired = false; leaseReleaseReason = 'identity-access-never-started'; }
+        if (reconciliationRequired && cleanupUnresolvedWithoutMutation(resource)) {
+          reconciliationRequired = false;
+          leaseReleaseReason = 'cleanup-unresolved-without-mutation';
+          stopRemaining = true;
+        }
       }
       outcomes.push({ project, ...result, report: path.join(projectDir, 'report.json') });
       writeSummary({ ...initial, outcomes });
-      if (reconciliationRequired || noIdentityAccess) break;
+      if (reconciliationRequired || stopRemaining) break;
     }
     const summary = summarizeReports(initial, outcomes, fs.readFileSync);
     writeSummary({ ...summary, ...(leaseReleaseReason ? { leaseReleaseReason } : {}), finishedAt: new Date().toISOString() });
